@@ -9,6 +9,8 @@ This file tracks product and architecture milestones. OpenSpec tracks implementa
 
 When a milestone is completed, update this roadmap in the same change that archives or completes the corresponding OpenSpec work.
 
+Milestones are ordered by dependency, not just by implementation convenience. Later implementation can be deferred, but contracts that earlier work depends on must be defined first.
+
 ## Dry Structure
 
 ```text
@@ -59,15 +61,15 @@ Exit criteria:
 - Architecture skill points agents to root roadmap and OpenSpec.
 - Document bloat has a consolidation plan.
 
-## Milestone 1: Harness Boundary Design
+## Milestone 1: Harness Boundary Hypothesis
 
-Goal: define the first implementation design for the coding harness before writing engine code.
+Goal: define the boundary map and the questions each boundary must answer before writing engine code. This milestone is a hypothesis, not approval to implement protocol-dependent engine internals.
 
 OpenSpec change:
 
 - `design-harness-boundaries`
 
-Required decisions:
+Required boundary questions:
 
 - Engine boundary.
 - Client/renderer boundary.
@@ -84,10 +86,10 @@ Exit criteria:
 
 - Raw reference research is preserved under the change's `research/` folder.
 - Neutral challenge is completed.
-- Design answers what is in v1, what is only designed for later, and what is explicitly out of scope.
-- Tasks are ready for protocol and engine scaffolding.
+- Design states which boundaries are hypothesized for v1, which are deferred, and which must be proven by later contract work.
+- Design explicitly gates engine implementation on the protocol/event-log contract.
 
-## Milestone 2: Protocol and Event Log
+## Milestone 2: Protocol and Event Log Contract Gate
 
 Goal: define and implement canonical IDs, messages, events, statuses, errors, serialization fixtures, replay fixtures, and append-only persistence before engine scaffolding depends on them.
 
@@ -110,7 +112,7 @@ Exit criteria:
 
 ## Milestone 3: Sequential Agent Loop
 
-Goal: implement the minimal engine loop with a scripted provider and sequential tool execution.
+Goal: implement the minimal engine loop with a scripted provider and sequential tool execution through the Milestone 2 command/event contracts.
 
 OpenSpec change:
 
@@ -119,13 +121,15 @@ OpenSpec change:
 Exit criteria:
 
 - Conversation/session/turn/step lifecycle.
+- Engine accepts `CommandEnvelope` input and emits `DurableRecord` plus `LiveEvent` output even for local in-process tests.
+- Engine does not rely on renderer callbacks, shared client memory, provider-native durable state, or object references across the boundary.
 - Tool use/tool result invariant.
 - Policy gate with allow, deny, ask, abort, and modified input.
 - Recoverable tool errors remain inside the loop.
 
 ## Milestone 4: Local Transport and Renderer
 
-Goal: expose the engine through an in-process transport and a minimal CLI/debug renderer.
+Goal: expose the engine through an in-process transport and a minimal CLI/debug renderer, proving that local clients use the same serialized protocol shape future clients will use.
 
 OpenSpec change:
 
@@ -133,8 +137,8 @@ OpenSpec change:
 
 Exit criteria:
 
-- Transport-safe command/event protocol.
-- Subscription with `afterEventId`.
+- In-process transport serializes/deserializes command and event envelopes in tests.
+- Subscription resume uses durable record sequence/cursor semantics, not live-event IDs.
 - Approval response and cancellation commands.
 - Debug turn timeline.
 
@@ -154,7 +158,7 @@ Exit criteria:
 
 ## Milestone 6: Parallel Tool Waves
 
-Goal: add opt-in parallel-safe tool waves.
+Goal: add opt-in parallel-safe tool waves after sequential execution exposes the real scheduler requirements.
 
 OpenSpec change:
 

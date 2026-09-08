@@ -1,6 +1,6 @@
 # Design: Harness Boundaries
 
-Status: challenged and narrowed
+Status: challenged and narrowed; boundary hypothesis only
 
 ## Boundary Map
 
@@ -16,9 +16,9 @@ client / renderer
   -> observability
 ```
 
-## v1 Boundary Decision
+## v1 Boundary Hypothesis
 
-v1 should define a transport-safe protocol but implement only an in-process transport first. This is acceptable only if every command/event is validated through JSON serialization round-trip fixtures before engine work relies on it.
+v1 should define a transport-safe protocol but implement only an in-process transport first. This is a boundary hypothesis, not implementation approval. It is acceptable only if every command/event is validated through JSON serialization round-trip fixtures before engine work relies on it.
 
 How we got there:
 
@@ -34,11 +34,11 @@ Tradeoffs:
 
 Decision:
 
-- Define `TransportCommand` and `EngineEvent` as serializable protocol types.
+- Let the protocol/event-log milestone define the exact command, durable record, and live event types.
 - Implement `InProcessTransport` in v1.
 - Design `SseTransport` / `WebSocketTransport` as future adapters, not v1 implementation.
 - Require tests proving commands/events round-trip through plain JSON without functions, class instances, symbols, Dates, or provider-native objects.
-- Require subscription ordering and resume semantics with `afterEventId`.
+- Require subscription ordering and resume semantics from durable record ordering, not ephemeral live-event IDs.
 
 ## Narrowed v1 Implementation Gate
 
@@ -53,7 +53,7 @@ Engine implementation must not start until the protocol/event-log milestone answ
 - cancellation race semantics
 - replay fixture requirements
 
-This changes the milestone sequence: protocol/event-log contracts come before engine scaffolding.
+This changes the milestone sequence: protocol/event-log contracts come before engine scaffolding, because the boundary cannot be validated without stable identity, ordering, durability, and replay semantics.
 
 ## Engine Boundary
 

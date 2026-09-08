@@ -8,6 +8,8 @@ Define the canonical protocol substrate that later engine work must use.
 
 Turnturn v1 will use a minimal canonical write-ahead event log, not a broad event-sourcing taxonomy. The durable layer is the recovery and replay source of truth for model-visible history and core engine state. Live renderer progress is projected separately and kept out of the durable cursor. Client intent enters through explicit command envelopes.
 
+This milestone is the contract gate for engine implementation. Remote transport and parallel execution can wait, but their enabling contracts cannot be retrofitted after the engine grows callback-shaped assumptions.
+
 ## How We Got Here
 
 Research inputs:
