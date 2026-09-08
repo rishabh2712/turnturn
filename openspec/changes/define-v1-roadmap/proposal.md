@@ -28,6 +28,6 @@ turnturn needs a durable design before implementation starts. The harness must b
 - `../codex`
 - `../gemini-cli`
 - `../agentic-code`
-- `docs/roadmap-v1.md`
-- `docs/architecture-decisions.md`
-
+- `ROADMAP.md`
+- `openspec/project.md`
+- `openspec/changes/design-harness-boundaries/`

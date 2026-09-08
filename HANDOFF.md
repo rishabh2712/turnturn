@@ -26,13 +26,14 @@ Homebrew is not installed because this macOS user lacks sudo/admin access.
 
 ## Frozen Roadmap Artifacts
 
-- `docs/roadmap-v1.md`
-- `docs/recommended-design-v1.md`
-- `docs/reference-research-summary.md`
-- `docs/roadmap-validation.md`
-- `docs/architecture-decisions.md`
+- `ROADMAP.md`
+- `openspec/project.md`
 - `openspec/changes/define-v1-roadmap/`
+- `openspec/changes/design-harness-boundaries/`
+- `openspec/changes/design-protocol-event-log/`
 - `.agents/skills/turnturn-architecture/SKILL.md`
+
+Do not recreate parallel long-form docs under `docs/` unless explicitly requested. Roadmap, project context, research, design, specs, and tasks now live in the root roadmap and OpenSpec tree.
 
 ## Reference Repositories
 
@@ -55,7 +56,7 @@ https://github.com/rishabh2712/turnturn.git
 Suggested command:
 
 ```sh
-git push -u origin main
+git push -u origin codex/first-design-boundaries
 ```
 
 Current blocker on this machine:

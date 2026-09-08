@@ -8,12 +8,14 @@
 - [x] Add reusable project skill for future architecture work.
 - [x] Initialize local git repository.
 - [x] Run three explorer subagents to validate the recommended design path.
-- [x] Add `docs/recommended-design-v1.md`.
-- [x] Update ADRs and roadmap from explorer synthesis.
+- [x] Consolidate recommended design into `ROADMAP.md`, OpenSpec, and project skill.
+- [x] Update roadmap and OpenSpec design from explorer synthesis.
 - [ ] Create remote GitHub repository.
 - [ ] Push initial roadmap commit.
 
-## Next Implementation Tasks
+## Historical Next Implementation Tasks
+
+These have been superseded by the milestone-specific task list in `openspec/changes/design-protocol-event-log/tasks.md`.
 
 - [ ] Scaffold `packages/protocol` with canonical event/message types.
 - [ ] Scaffold `packages/engine` with conversation/session/turn/step state machine.

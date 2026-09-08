@@ -9,5 +9,5 @@
 - [x] Run neutral challenge against the proposed boundary map.
 - [x] Write final `research/synthesis.md`.
 - [x] Update design from neutral challenge.
-- [ ] Decide document consolidation plan for existing `docs/` bloat.
-- [ ] Validate OpenSpec change.
+- [x] Decide document consolidation plan for existing `docs/` bloat.
+- [x] Validate OpenSpec change.

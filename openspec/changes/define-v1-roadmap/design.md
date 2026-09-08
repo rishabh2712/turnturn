@@ -1,6 +1,6 @@
 # Design: turnturn v1 Harness Roadmap
 
-This document records the validated design direction after Codex, Gemini CLI, and agentic-code explorer reports were synthesized. Full details live in `docs/recommended-design-v1.md`.
+This document records the validated design direction after Codex, Gemini CLI, and agentic-code explorer reports were synthesized. The root milestone source of truth is `ROADMAP.md`; detailed milestone designs, research, specs, and tasks live under `openspec/changes/`.
 
 ## Architecture Shape
 
@@ -97,4 +97,4 @@ The timeline renderer is a debugging tool, not the engine.
 
 ## Decision Discipline
 
-Each implementation change must update `docs/architecture-decisions.md` or link to an existing ADR when it makes or depends on a major architectural choice.
+Each implementation change must update the relevant OpenSpec `design.md`, `research/synthesis.md`, or accepted spec when it makes or depends on a major architectural choice. Do not create a parallel ADR file unless explicitly requested.
