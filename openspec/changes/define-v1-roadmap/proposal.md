@@ -25,9 +25,9 @@ turnturn needs a durable design before implementation starts. The harness must b
 
 ## References
 
-- `/Users/zoomroom_bangalore/Desktop/source/codex`
-- `/Users/zoomroom_bangalore/Desktop/source/gemini-cli`
-- `/Users/zoomroom_bangalore/Desktop/source/agentic-code`
+- `../codex`
+- `../gemini-cli`
+- `../agentic-code`
 - `docs/roadmap-v1.md`
 - `docs/architecture-decisions.md`
 

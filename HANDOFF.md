@@ -4,10 +4,10 @@ Date: 2026-09-08
 
 ## Current State
 
-Project path:
+Repo root:
 
 ```sh
-/Users/zoomroom_bangalore/Desktop/source/turnturn
+the current turnturn checkout
 ```
 
 OpenSpec is initialized with Codex and Gemini guidance.
@@ -36,11 +36,11 @@ Homebrew is not installed because this macOS user lacks sudo/admin access.
 
 ## Reference Repositories
 
-Located beside this repo:
+Expected as sibling directories of the turnturn repo root:
 
-- `/Users/zoomroom_bangalore/Desktop/source/codex`
-- `/Users/zoomroom_bangalore/Desktop/source/gemini-cli`
-- `/Users/zoomroom_bangalore/Desktop/source/agentic-code`
+- `../codex`
+- `../gemini-cli`
+- `../agentic-code`
 
 ## Immediate Next Step
 
@@ -67,5 +67,5 @@ fatal: could not read Username for 'https://github.com': Device not configured
 No GitHub HTTPS credentials, `gh` auth, or SSH key are configured locally. After authenticating GitHub on the next machine, push the existing local commits or restore from:
 
 ```sh
-/Users/zoomroom_bangalore/Desktop/source/turnturn-v1-roadmap.bundle
+../turnturn-v1-roadmap.bundle
 ```

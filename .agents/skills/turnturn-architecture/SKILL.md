@@ -11,25 +11,41 @@ Use this skill for turnturn roadmap, architecture, and harness implementation wo
 
 Before making architectural or implementation decisions, read:
 
-- `docs/roadmap-v1.md`
-- `docs/architecture-decisions.md`
+- `ROADMAP.md`
+- `openspec/project.md`
 - Relevant OpenSpec artifacts under `openspec/specs/` and `openspec/changes/`
 
-When a task concerns the coding harness, inspect the relevant reference implementation locally before deciding:
+Treat `ROADMAP.md` as the root milestone source of truth. OpenSpec changes define milestone implementation details. When a milestone is completed, update `ROADMAP.md` in the same work.
 
-- `/Users/zoomroom_bangalore/Desktop/source/codex`
-- `/Users/zoomroom_bangalore/Desktop/source/gemini-cli`
-- `/Users/zoomroom_bangalore/Desktop/source/agentic-code`
+Do not create or extend parallel long-form architecture docs under `docs/` unless the user explicitly asks. Put durable architecture context in `openspec/project.md`, milestone conclusions in `openspec/changes/<change>/design.md`, accepted behavior in `openspec/specs/`, and raw research in `openspec/changes/<change>/research/`.
+
+When a task concerns the coding harness, resolve the turnturn repo root and inspect the relevant reference implementations from sibling paths before deciding:
+
+- `../codex`
+- `../gemini-cli`
+- `../agentic-code`
+
+If a reference repo is missing, record the missing path in the current OpenSpec research artifact and continue with the available evidence. Do not write machine-specific absolute paths into durable docs.
 
 ## Reference Exploration Workflow
 
 When the user asks to validate, choose, freeze, or recommend a harness architecture, spawn three parallel explorer subagents before finalizing the recommendation:
 
-- Codex explorer: inspect `/Users/zoomroom_bangalore/Desktop/source/codex` for session/turn/step orchestration, provider boundary, tool runtime, policy/approval handling, persistence, tracing, parallelism, memory/compaction, and subagents.
-- Gemini CLI explorer: inspect `/Users/zoomroom_bangalore/Desktop/source/gemini-cli` for TypeScript SDK shape, `AgentLoopContext`, provider/model abstractions, tool registry, confirmation bus, session/resume, and missing extension points.
-- agentic-code explorer: inspect `/Users/zoomroom_bangalore/Desktop/source/agentic-code` for `QueryEngine`, message adapters, permission handling, session history, remote/local rendering, memory mechanics, and task/subagent patterns.
+- Codex explorer: inspect `../codex` for session/turn/step orchestration, provider boundary, tool runtime, policy/approval handling, persistence, tracing, parallelism, memory/compaction, and subagents.
+- Gemini CLI explorer: inspect `../gemini-cli` for TypeScript SDK shape, `AgentLoopContext`, provider/model abstractions, tool registry, confirmation bus, session/resume, and missing extension points.
+- agentic-code explorer: inspect `../agentic-code` for `QueryEngine`, message adapters, permission handling, session history, remote/local rendering, memory mechanics, and task/subagent patterns.
 
-Integrate the reports into `docs/recommended-design-v1.md` before treating the roadmap as implementation-ready.
+Preserve the raw reports in `openspec/changes/<change>/research/`, then integrate them into `research/synthesis.md` and the change's `design.md` before treating the roadmap as implementation-ready.
+
+## Model Routing
+
+Use explicit model routing for delegated work when the tool supports model selection:
+
+- Research/explorer subagents: use `gpt-5.5`.
+- Synthesis/reconciliation subagents: use `gpt-5.6-sol`.
+- Code-writing subagents: use `gpt-5.6-luna`.
+
+Keep the main agent responsible for integrating results, checking tradeoffs, and preserving raw research in OpenSpec.
 
 ## Decision Discipline
 
@@ -41,7 +57,7 @@ Every major design choice must record:
 - Engineering tradeoffs considered.
 - Consequences for engine, renderer, persistence, provider adapters, tools, approvals, tracing, memory, or subagents.
 
-Update `docs/architecture-decisions.md` when a new decision is made or an existing one changes.
+Record major decisions in the relevant OpenSpec `design.md` or `research/synthesis.md`. Use a separate ADR file only if the user explicitly asks for formal ADRs.
 
 ## v1 Boundaries
 
