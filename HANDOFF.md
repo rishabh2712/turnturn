@@ -57,3 +57,15 @@ Suggested command:
 ```sh
 git push -u origin main
 ```
+
+Current blocker on this machine:
+
+```text
+fatal: could not read Username for 'https://github.com': Device not configured
+```
+
+No GitHub HTTPS credentials, `gh` auth, or SSH key are configured locally. After authenticating GitHub on the next machine, push the existing local commits or restore from:
+
+```sh
+/Users/zoomroom_bangalore/Desktop/source/turnturn-v1-roadmap.bundle
+```
