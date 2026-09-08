@@ -93,18 +93,20 @@ Goal: define and implement canonical IDs, messages, events, statuses, errors, se
 
 OpenSpec change:
 
-- TBD
+- `design-protocol-event-log`
 
 Exit criteria:
 
 - Provider-neutral protocol package.
 - Event schema versioning.
-- Durable vs ephemeral event distinction.
-- JSON serialization round-trip fixtures for transport commands/events.
-- Event identity, ordering, parent/causal IDs, and subscription resume semantics.
+- Durable record vs live event distinction.
+- JSON serialization round-trip fixtures for commands, durable records, live events, and structured errors.
+- Record identity, writer-assigned ordering, typed semantic IDs, and durable cursor semantics.
 - Tool-use/tool-result state machine.
 - Approval and cancellation command semantics.
-- Replay fixture for one completed turn.
+- Append-only JSONL writer/reader semantics.
+- Separate engine-state and provider-history replay projections.
+- Replay fixtures for completed turn, denial, cancellation races, duplicate commands, corrupt tail, cursor resume, and multiple tool calls in one provider step.
 
 ## Milestone 3: Sequential Agent Loop
 
