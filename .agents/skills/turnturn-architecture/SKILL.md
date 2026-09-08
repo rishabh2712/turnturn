@@ -21,6 +21,16 @@ When a task concerns the coding harness, inspect the relevant reference implemen
 - `/Users/zoomroom_bangalore/Desktop/source/gemini-cli`
 - `/Users/zoomroom_bangalore/Desktop/source/agentic-code`
 
+## Reference Exploration Workflow
+
+When the user asks to validate, choose, freeze, or recommend a harness architecture, spawn three parallel explorer subagents before finalizing the recommendation:
+
+- Codex explorer: inspect `/Users/zoomroom_bangalore/Desktop/source/codex` for session/turn/step orchestration, provider boundary, tool runtime, policy/approval handling, persistence, tracing, parallelism, memory/compaction, and subagents.
+- Gemini CLI explorer: inspect `/Users/zoomroom_bangalore/Desktop/source/gemini-cli` for TypeScript SDK shape, `AgentLoopContext`, provider/model abstractions, tool registry, confirmation bus, session/resume, and missing extension points.
+- agentic-code explorer: inspect `/Users/zoomroom_bangalore/Desktop/source/agentic-code` for `QueryEngine`, message adapters, permission handling, session history, remote/local rendering, memory mechanics, and task/subagent patterns.
+
+Integrate the reports into `docs/recommended-design-v1.md` before treating the roadmap as implementation-ready.
+
 ## Decision Discipline
 
 Every major design choice must record:
@@ -52,4 +62,3 @@ Use OpenSpec for task management:
 - Design records approach and tradeoffs.
 - Tasks stay implementation-oriented and verifiable.
 - Do not implement from chat-only requirements when an OpenSpec change is expected.
-

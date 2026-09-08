@@ -1,8 +1,10 @@
 # Design: turnturn v1 Harness Roadmap
 
+This document records the validated design direction after Codex, Gemini CLI, and agentic-code explorer reports were synthesized. Full details live in `docs/recommended-design-v1.md`.
+
 ## Architecture Shape
 
-turnturn v1 is engine-first. The engine owns sessions, turns, provider steps, tool scheduling, policy checks, persistence, and trace events. Renderers consume event streams and send user actions back through public commands.
+turnturn v1 is engine-first and event-first. The engine owns sessions, turns, provider steps, tool scheduling, policy checks, persistence, and trace events. Renderers consume canonical event streams and send user actions back through public commands.
 
 The core boundary is:
 
@@ -22,6 +24,12 @@ The core boundary is:
 - `observability`: trace IDs, timelines, metrics, redaction.
 - `memory`: summaries/facts/consolidation interfaces.
 - `subagents`: child-session model and parent-child event linking.
+
+## Validated Source Blend
+
+- Codex dictates the conceptual harness layering: conversation/session, turn, step, item, tool runtime, central policy, replay, and traceability.
+- Gemini CLI dictates TypeScript ergonomics: small SDK facade, explicit loop context, typed tool definitions, invocation objects, scheduler, and confirmation bus concept.
+- agentic-code dictates operational invariants: every tool use gets a tool result, durable events are distinct from progress events, permissions resolve once, and renderer/SDK state is an adapter over canonical truth.
 
 ## Tool Execution Model
 
@@ -90,4 +98,3 @@ The timeline renderer is a debugging tool, not the engine.
 ## Decision Discipline
 
 Each implementation change must update `docs/architecture-decisions.md` or link to an existing ADR when it makes or depends on a major architectural choice.
-

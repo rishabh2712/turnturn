@@ -1,6 +1,6 @@
 # turnturn v1 Roadmap
 
-Status: frozen for first implementation planning
+Status: validated baseline; implementation should follow `docs/recommended-design-v1.md`
 Date: 2026-09-08
 
 ## v1 Goal
@@ -13,6 +13,16 @@ Build the first coding harness for turnturn: an engine that can run an agent loo
 - Gemini CLI: TypeScript SDK ergonomics, `AgentLoopContext`, tool registries, confirmation bus, session/resume APIs, and strongly typed tool abstractions.
 - agentic-code: `QueryEngine` as conversation lifecycle owner, one engine per conversation, turn-scoped submission, permission-denial tracking, session history, and remote/local rendering boundaries.
 - OpenSpec: specs and changes remain the task-management source of truth, with roadmap decisions captured before implementation.
+
+## Validation Result
+
+This roadmap has been validated through parallel exploration of the three reference repositories. The detailed recommendation is captured in `docs/recommended-design-v1.md`.
+
+- Codex explorer validates orchestration, sessions, turns, steps, tool runtime, approvals, persistence, tracing, parallelism, and subagents.
+- Gemini CLI explorer validates TypeScript SDK ergonomics, typed contexts, tool registry, confirmation bus, and session/resume patterns.
+- agentic-code explorer validates conversation ownership, message adapters, permission handling, session history, remote/local rendering boundaries, memory, and task patterns.
+
+The result is not "copy a repo." The selected path is Codex-inspired layering, Gemini-inspired TypeScript ergonomics, and agentic-code-inspired operational invariants.
 
 ## Phase 1A: Harness Spine
 
@@ -120,4 +130,3 @@ Exit criteria:
 - Cloud sandbox orchestration.
 - Long-term semantic memory retrieval beyond explicit summaries/facts.
 - Provider-specific feature completeness.
-

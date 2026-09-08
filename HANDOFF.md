@@ -27,6 +27,9 @@ Homebrew is not installed because this macOS user lacks sudo/admin access.
 ## Frozen Roadmap Artifacts
 
 - `docs/roadmap-v1.md`
+- `docs/recommended-design-v1.md`
+- `docs/reference-research-summary.md`
+- `docs/roadmap-validation.md`
 - `docs/architecture-decisions.md`
 - `openspec/changes/define-v1-roadmap/`
 - `.agents/skills/turnturn-architecture/SKILL.md`
@@ -41,12 +44,16 @@ Located beside this repo:
 
 ## Immediate Next Step
 
-Create a GitHub repository named `turnturn`, add it as `origin`, and push the initial commit.
+Push to the configured GitHub repository:
 
-Suggested commands after remote creation:
+Remote:
 
 ```sh
-git remote add origin git@github.com:<owner>/turnturn.git
-git push -u origin main
+https://github.com/rishabh2712/turnturn.git
 ```
 
+Suggested command:
+
+```sh
+git push -u origin main
+```

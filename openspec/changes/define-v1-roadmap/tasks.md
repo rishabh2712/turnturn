@@ -3,10 +3,13 @@
 - [x] Create OpenSpec change `define-v1-roadmap`.
 - [x] Inspect Codex, Gemini CLI, and agentic-code reference harnesses.
 - [x] Define v1 roadmap phases.
-- [x] Capture architecture decisions with sources and tradeoffs.
+- [x] Capture baseline architecture decisions with sources and tradeoffs.
 - [x] Add OpenSpec delta spec for the v1 harness.
 - [x] Add reusable project skill for future architecture work.
 - [x] Initialize local git repository.
+- [x] Run three explorer subagents to validate the recommended design path.
+- [x] Add `docs/recommended-design-v1.md`.
+- [x] Update ADRs and roadmap from explorer synthesis.
 - [ ] Create remote GitHub repository.
 - [ ] Push initial roadmap commit.
 
@@ -20,4 +23,3 @@
 - [ ] Add append-only filesystem event store.
 - [ ] Add hydration/replay fixtures.
 - [ ] Add trace timeline renderer for local debugging.
-

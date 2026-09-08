@@ -2,6 +2,30 @@
 
 Each decision records how we got there and the tradeoffs considered.
 
+## ADR-000: Roadmap Requires Reference Validation
+
+Decision: the v1 roadmap required validation through separate Codex, Gemini CLI, and agentic-code explorer subagents before becoming implementation-ready. That validation is now captured in `docs/recommended-design-v1.md` and `docs/reference-research-summary.md`.
+
+How we got there: the first roadmap captured the desired scope well, but the user correctly pointed out that it mostly reflected the prompt rather than a validated architecture recommendation.
+
+Tradeoffs considered: Moving straight to implementation would save time today but risks baking in assumptions. A short validation pass cost time but produced a sharper design foundation and a reusable research workflow.
+
+## ADR-009: Recommended v1 Architecture Blend
+
+Decision: turnturn v1 will use Codex-inspired runtime layering, Gemini-inspired TypeScript SDK/tool ergonomics, and agentic-code-inspired operational invariants.
+
+How we got there: three explorer subagents reviewed the reference repos. Codex had the strongest conceptual harness model. Gemini had the cleanest TypeScript-facing SDK and typed tool abstractions. agentic-code had the clearest operational robustness invariants around tool results, append-only history, permissions, and render adapters.
+
+Tradeoffs considered: Copying Codex would overload v1 with production compatibility layers. Copying Gemini would risk provider leakage and multiple event planes. Copying agentic-code would risk a large query-loop hotspot and broad mutable context. The blended approach preserves the best parts while keeping turnturn small enough to ship.
+
+## ADR-010: One Canonical Event Plane
+
+Decision: turnturn v1 will start with one canonical event protocol and force provider, SDK, remote, and UI surfaces to adapt at the boundary.
+
+How we got there: Gemini's multiple event systems are powerful but complex. agentic-code's lossy SDK/render adapters show why internal truth must be explicit. Codex's event lifecycle makes tracing and replay practical.
+
+Tradeoffs considered: Multiple event planes can optimize each surface independently, but they create translation debt early. One canonical plane creates upfront schema pressure but makes persistence, replay, and observability coherent.
+
 ## ADR-001: Engine and Renderer Boundary
 
 Decision: turnturn v1 separates the agent engine from every renderer. CLI, web, desktop, and SDK surfaces consume canonical events rather than calling private engine state.
@@ -65,4 +89,3 @@ Decision: memory is not raw chat history. v1 prepares explicit summaries/facts a
 How we got there: The user wants eventual memory building and consolidation. Existing harnesses distinguish context compaction, memory files, and history injection.
 
 Tradeoffs considered: Injecting all history is simple but expensive and noisy. Automatic memory is powerful but dangerous if silent. A separate consolidation layer makes memory useful without hiding what changed.
-
