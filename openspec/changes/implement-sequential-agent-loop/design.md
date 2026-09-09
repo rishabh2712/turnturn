@@ -44,7 +44,7 @@ V1 engine code does not own:
 
 ## First Slice
 
-The first implementation slice defines engine ports in `packages/assistant-core`:
+The current first-slice hypothesis is to define engine ports in `packages/assistant-core`:
 
 - `ProviderPort` returns scripted assistant messages and tool requests in provider order.
 - `ToolExecutorPort` executes one canonical tool request at a time.

@@ -7,7 +7,7 @@
 
 Do not start implementation tasks until every item in this gate is complete and `pnpm check:milestone implement-sequential-agent-loop` passes.
 
-- [ ] Complete user interview for intended design, implementation approach, and failure modes.
+- [x] Complete user interview for intended design, implementation approach, and failure modes.
 - [ ] Preserve Codex reference research in `research/codex.md`.
 - [ ] Preserve Gemini CLI reference research in `research/gemini-cli.md`.
 - [ ] Preserve agentic-code reference research in `research/agentic-code.md`.
