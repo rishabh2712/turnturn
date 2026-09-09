@@ -114,11 +114,13 @@ Exit criteria:
 
 ## Milestone 3: Sequential Agent Loop
 
+Status: design gate pending. OpenSpec change `implement-sequential-agent-loop` owns the executable engine loop, but implementation must not start until reference research, user interview, neutral challenge, and synthesis are complete.
+
 Goal: implement the minimal engine loop with a scripted provider and sequential tool execution through the Milestone 2 command/event contracts.
 
 OpenSpec change:
 
-- TBD
+- `implement-sequential-agent-loop`
 
 Exit criteria:
 

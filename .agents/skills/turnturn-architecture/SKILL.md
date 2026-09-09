@@ -31,7 +31,28 @@ If a reference repo is missing, record the missing path in the current OpenSpec 
 
 ## Reference Exploration Workflow
 
-When the user asks to validate, choose, freeze, or recommend a harness architecture, spawn three parallel explorer subagents before finalizing the recommendation:
+Before starting implementation for any new milestone, the current OpenSpec change MUST pass a design gate. Do not write implementation code until the change contains:
+
+- User interview notes covering what design the user expects, how implementation should proceed, and which failure modes must be addressed.
+- `research/codex.md`
+- `research/gemini-cli.md`
+- `research/agentic-code.md`
+- `research/neutral-challenge.md`
+- `research/synthesis.md`
+- A completed `## Design Gate` checklist in `tasks.md`
+- A `design.md` updated from the user interview, reference research, neutral challenge, and synthesis
+
+Run `pnpm check:milestone <change-id>` before implementation. If it fails, stop implementation and complete the missing design-gate work first.
+
+When interviewing the user for a milestone, capture answers to:
+
+- What are we designing in this milestone?
+- How should the implementation be approached?
+- Which failure modes must this milestone address?
+- Which failure modes are explicitly parked for a later milestone?
+- What would make this design unacceptable even if the code works?
+
+When the user asks to validate, choose, freeze, recommend, or implement a harness architecture milestone, spawn three parallel explorer subagents before finalizing the recommendation:
 
 - Codex explorer: inspect `../codex` for session/turn/step orchestration, provider boundary, tool runtime, policy/approval handling, persistence, tracing, parallelism, memory/compaction, and subagents.
 - Gemini CLI explorer: inspect `../gemini-cli` for TypeScript SDK shape, `AgentLoopContext`, provider/model abstractions, tool registry, confirmation bus, session/resume, and missing extension points.
@@ -82,6 +103,7 @@ Record major decisions in the relevant OpenSpec `design.md` or `research/synthes
 Use OpenSpec for task management:
 
 - New architectural or feature work starts as an OpenSpec change.
+- Every implementation milestone includes a `## Design Gate` in `tasks.md` before implementation tasks.
 - Specs define required behavior.
 - Design records approach and tradeoffs.
 - Tasks stay implementation-oriented and verifiable.
