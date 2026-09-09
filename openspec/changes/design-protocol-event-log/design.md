@@ -301,7 +301,7 @@ Implementation choices and tradeoffs:
 - Reject JSON values that would be silently dropped or changed, including runtime objects and non-finite numbers. This costs a validation traversal but exposes serialization mistakes before they become persistence or reconnect defects.
 - Preserve a provider's tool-call ID only as opaque string metadata alongside the canonical tool ID. This supports later adapter pairing without importing SDK objects into the protocol.
 
-The engine implementation gate remains closed until the remaining storage, replay, idempotency, and race fixtures pass.
+The engine implementation gate closes over protocol, storage, and replay shape only. Command idempotency outcomes and approval/cancellation race execution stay parked until the sequential engine has a real command application path.
 
 ## JSONL Storage Slice
 
@@ -348,18 +348,69 @@ Tradeoffs:
 - The reducer records issues and continues where possible, which is useful for observability but means callers must check `issues` before treating state as valid.
 - It validates lifecycle shape only at the state level. Tool-result pairing, synthetic-result policy, command idempotency outcomes, and provider-message reconstruction remain explicit later tasks.
 
+## Provider-History Reducer Slice
+
+`packages/protocol/src/provider-history.ts` implements the model-visible replay projection as a separate package subpath, `@turnturn/protocol/provider-history`.
+
+Decision:
+
+- Reconstruct provider-neutral user input, assistant messages, tool requests, and terminal tool results from durable records.
+- Keep engine-only records such as conversation/session creation, provider-step lifecycle, approvals, and turn terminal state out of provider history.
+- Preserve canonical `toolCallId`, optional opaque provider tool-call ID, `stepId`, and `providerOrder` so adapters can later render provider-specific message shapes.
+- Use explicit string enums for provider-history item types, terminal tool-result statuses, and reducer issue codes.
+
+How we got there:
+
+- Engine-state replay now proves lifecycle recovery separately, so provider-history replay can stay focused on the prompt/history view the next model request needs.
+- Codex-inspired layering keeps rollout facts, app state, and model-visible items as related but separate projections.
+- agentic-code's tool-use/tool-result invariant shaped the first validation: missing tool requests and duplicate terminal tool results are reported as projection issues.
+
+Tradeoffs:
+
+- The reducer does not yet synthesize missing tool results or enforce every provider-specific pairing rule. That stays in the explicit tool-use/tool-result validation task so repair policy is not hidden inside history replay.
+- The reducer preserves durable sequence order and carries `providerOrder` for same-step requests; the later multi-tool fixture will harden exact ordering rules for skipped or cancelled siblings.
+
+## Parked Behavior
+
+The following behavior is intentionally deferred beyond the protocol/event-log gate:
+
+- Command idempotency outcomes for duplicate submit, approval, and cancellation commands.
+- Approval/cancellation race execution behavior.
+- Multi-tool sibling behavior when one same-step tool is skipped, denied, cancelled, or fails.
+- Provider-specific history validation gates for APIs that require strict tool-use/tool-result pairing.
+
+Decision:
+
+- Keep `commandId`, optional `idempotencyKey`, approval IDs, cancellation command types, terminal tool-result record types, `providerOrder`, and `synthetic` markers in the protocol now.
+- Do not implement duplicate-command stores, race resolvers, sibling schedulers, or provider-specific validators until their owning milestone exists.
+
+How we got there:
+
+- The protocol fields are cheap to preserve now and expensive to retrofit after engine code depends on callback-shaped behavior.
+- The actual outcomes depend on command application state: whether the first command was accepted, rejected, pending, partially persisted, or already terminal.
+- Provider-specific validation depends on the adapter shape and selected provider API, not only on the canonical log shape.
+
+Tradeoffs:
+
+- Parking this reduces speculative machinery in Milestone 2.
+- The cost is that Milestone 3 must begin by binding command handling to these already-defined protocol hooks instead of inventing new control paths.
+
 ## Fixture Requirements
 
 Before engine implementation, add fixtures for:
 
 - completed turn with one approved tool
 - approval denial
+- corrupt trailing record
+- resume after durable sequence
+- provider-history projection from durable records
+
+Engine/provider-adapter milestones add fixtures for:
+
 - cancellation while awaiting approval
 - cancellation while running
 - duplicate approval response
 - duplicate command
-- corrupt trailing record
-- resume after durable sequence
 - multiple tool calls emitted in one provider step and executed sequentially
 
 Each fixture must prove:

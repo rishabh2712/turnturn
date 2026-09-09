@@ -91,7 +91,7 @@ Exit criteria:
 
 ## Milestone 2: Protocol and Event Log Contract Gate
 
-Status: in progress. Protocol types, JSON serialization fixtures, JSONL writer/reader storage, and engine-state replay are implemented; provider-history replay, idempotency, and lifecycle race validation remain open in OpenSpec.
+Status: in progress. Protocol types, JSON serialization fixtures, JSONL writer/reader storage, engine-state replay, and provider-history replay are implemented. Command idempotency, lifecycle race behavior, and provider-specific history validation are parked until the engine/provider-adapter milestones; Milestone 2 keeps only the protocol hooks they depend on.
 
 Goal: define and implement canonical IDs, messages, events, statuses, errors, serialization fixtures, replay fixtures, and append-only persistence before engine scaffolding depends on them.
 
@@ -110,7 +110,7 @@ Exit criteria:
 - Approval and cancellation command semantics.
 - Append-only JSONL writer/reader semantics.
 - Separate engine-state and provider-history replay projections.
-- Replay fixtures for completed turn, denial, cancellation races, duplicate commands, corrupt tail, cursor resume, and multiple tool calls in one provider step.
+- Replay fixtures for completed turn, denial, corrupt tail, cursor resume, and model-visible provider history. Cancellation races, duplicate command outcomes, and multiple tool sibling behavior are implemented with the engine because they depend on command application semantics.
 
 ## Milestone 3: Sequential Agent Loop
 

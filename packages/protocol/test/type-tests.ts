@@ -1,5 +1,7 @@
 import { ApprovalDecisions, CommandTypes, DurableRecordTypes, LiveEventTypes } from "../src/index.js";
 import type { CommandEnvelope, DurableRecord, DurableRecordDraft, LiveEvent, ConversationId, SessionId, TurnId, StepId, ToolCallId, ApprovalId, CommandId, RecordId, EventId } from "../src/index.js";
+import { ProviderHistoryItemTypes, ProviderToolResultStatuses } from "../src/provider-history.js";
+import type { ProviderHistoryItem } from "../src/provider-history.js";
 
 declare const conversationId: ConversationId;
 declare const sessionId: SessionId;
@@ -53,4 +55,10 @@ declare const anyRecord: DurableRecord;
 if (anyRecord.type === DurableRecordTypes.ToolRequested) {
   const providerOrder: number = anyRecord.payload.providerOrder;
   void providerOrder;
+}
+
+declare const historyItem: ProviderHistoryItem;
+if (historyItem.type === ProviderHistoryItemTypes.ToolResult) {
+  const completed: ProviderToolResultStatuses = historyItem.status;
+  void completed;
 }

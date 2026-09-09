@@ -19,11 +19,16 @@
 - [x] Implement append-only JSONL session log writer with writer-assigned sequence and duplicate `recordId` handling.
 - [x] Implement JSONL reader with corrupt trailing-record recovery and strict required-metadata validation.
 - [x] Implement engine-state reducer for turn/tool/approval state.
-- [ ] Implement provider-history reducer for model-visible history.
-- [ ] Implement command idempotency semantics for duplicate submit, approval, and cancellation commands.
-- [ ] Implement approval/cancellation race fixtures.
-- [ ] Implement multi-tool same-step sequential-order fixture.
-- [ ] Add validation for tool-use/tool-result pairing and explicit synthetic-result marking.
+- [x] Implement provider-history reducer for model-visible history.
+
+## Parked Until Engine Or Provider Adapters Exist
+
+These are intentionally not Milestone 2 implementation tasks. Milestone 2 keeps the protocol fields and durable record types that make them possible; the actual behavior should be implemented when there is an engine command application path or provider adapter to validate against.
+
+- [ ] Implement command idempotency semantics for duplicate submit, approval, and cancellation commands in the sequential engine milestone.
+- [ ] Implement approval/cancellation race behavior in the sequential engine milestone.
+- [ ] Implement multi-tool same-step sequential-order behavior in the sequential engine milestone.
+- [ ] Add provider-specific tool-use/tool-result validation and explicit synthetic-result gates in the provider adapter milestone.
 
 ## Implementation Gate
 
@@ -40,3 +45,5 @@ Do not start engine implementation until this change answers:
 - provider stream mapping constraints
 - JSON round-trip fixture expectations
 - replay fixture expectations
+
+Implementation of command idempotency, approval/cancellation races, and provider-specific history validation is not part of this gate; only the protocol hooks and durable taxonomy are required here.

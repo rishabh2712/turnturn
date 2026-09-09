@@ -16,6 +16,10 @@
     "./engine-state": {
       "types": "./dist/engine-state.d.ts",
       "import": "./dist/engine-state.js"
+    },
+    "./provider-history": {
+      "types": "./dist/provider-history.d.ts",
+      "import": "./dist/provider-history.js"
     }
   },
   "files": [
