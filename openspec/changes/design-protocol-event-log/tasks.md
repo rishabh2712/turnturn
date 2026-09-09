@@ -14,8 +14,8 @@
 
 ## Implementation Tasks For Milestone 2
 
-- [ ] Define protocol types for `CommandEnvelope`, `DurableRecord`, `LiveEvent`, typed IDs, structured errors, and supported v1 record/command types.
-- [ ] Add JSON round-trip fixtures for command envelopes, durable records, live events, and structured errors.
+- [x] Define protocol types for `CommandEnvelope`, `DurableRecord`, `LiveEvent`, typed IDs, structured errors, and supported v1 record/command types.
+- [x] Add JSON round-trip fixtures for command envelopes, durable records, live events, and structured errors.
 - [ ] Implement append-only JSONL session log writer with writer-assigned sequence and duplicate `recordId` handling.
 - [ ] Implement JSONL reader with corrupt trailing-record recovery and strict required-metadata validation.
 - [ ] Implement engine-state reducer for turn/tool/approval state.

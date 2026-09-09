@@ -287,6 +287,22 @@ Provider adapters map native stream events into:
 
 Opaque provider request/response IDs may be stored as string metadata.
 
+## First Implementation Slice
+
+`packages/protocol` defines the three envelope families and their JSON serialization fixtures. Storage, command handling, and replay remain separate implementation tasks; serialization examples do not demonstrate valid lifecycle transitions.
+
+Implementation choices and tradeoffs:
+
+- The initial wire schema uses numeric `schemaVersion: 1`. Runtime version checks and future-version rejection must be implemented with the reader/transport decoders; the current serializer validates JSON representation only.
+- Use explicit TypeScript string enums for protocol discriminators, with enum values equal to the stable persisted JSON wire strings. This keeps implementation code centralized around symbols such as `CommandTypes.TurnSubmit` while preserving readable logs such as `"turn.submit"`. Numeric or implicit enum values are forbidden.
+- Use discriminated TypeScript unions with payloads and required scope IDs per message type. This follows the tagged messages observed in the reference implementations and catches mismatched payloads during development. Type checking does not replace runtime validation of untrusted transport input or persisted records.
+- Keep writer-assigned `sequence` out of durable drafts and live events. This makes the ordering ownership explicit before the log writer is implemented.
+- Keep ID formatting/parsing separate from ID generation. Codex's `protocol/src/response_item_id.rs` makes this distinction; the runtime must supply UUIDv7 IDs when creating new records. A formatter alone does not guarantee uniqueness or time ordering.
+- Reject JSON values that would be silently dropped or changed, including runtime objects and non-finite numbers. This costs a validation traversal but exposes serialization mistakes before they become persistence or reconnect defects.
+- Preserve a provider's tool-call ID only as opaque string metadata alongside the canonical tool ID. This supports later adapter pairing without importing SDK objects into the protocol.
+
+The engine implementation gate remains closed until the remaining storage, replay, idempotency, and race fixtures pass.
+
 ## Fixture Requirements
 
 Before engine implementation, add fixtures for:

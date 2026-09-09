@@ -1,6 +1,6 @@
 # turnturn
 
-This repository is the starting point for a coding-assistant product: a web app, shared assistant core, and workspace tooling that can grow into agentic coding workflows.
+turnturn is a coding assistant. Development starts with a provider-neutral harness and serialized engine/client contracts.
 
 ## Current Machine Status
 
@@ -16,16 +16,11 @@ Homebrew is not installed because this macOS user does not currently have sudo/a
 source ~/.zshrc
 ```
 
-## Project Shape
+## Start Here
 
-- `apps/web`: future product web app
-- `packages/assistant-core`: shared assistant orchestration primitives
-- `docs`: product, architecture, and operating notes
-- `scripts`: local setup helpers
+- [ROADMAP.md](ROADMAP.md): milestone order and completion criteria.
+- [OpenSpec project context](openspec/project.md): boundaries, reference discovery, and working rules.
+- [Architecture skill](.agents/skills/turnturn-architecture/SKILL.md): research, challenge, synthesis, and implementation discipline.
+- [Protocol and event log tasks](openspec/changes/design-protocol-event-log/tasks.md): current implementation work; design and raw research live in the same change.
 
-## First Milestones
-
-1. Install machine prerequisites.
-2. Initialize git after Command Line Tools are available.
-3. Choose the first product slice: chat UI, repo indexing, terminal agent, or IDE integration.
-4. Add the app framework and assistant runtime dependencies.
+Update the roadmap when a milestone completes. Do not commit unless explicitly asked.
