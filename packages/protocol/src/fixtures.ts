@@ -1,4 +1,4 @@
-import { CommandTypes, DurableRecordTypes, LiveEventTypes, formatApprovalId, formatCommandId, formatConversationId, formatEventId, formatRecordId, formatSessionId, formatStepId, formatToolCallId, formatTurnId } from "./index.js";
+import { ApprovalDecisions, CommandTypes, DurableRecordTypes, LiveEventTypes, formatApprovalId, formatCommandId, formatConversationId, formatEventId, formatRecordId, formatSessionId, formatStepId, formatToolCallId, formatTurnId } from "./index.js";
 import type { CommandEnvelope, DurableRecord, LiveEvent } from "./index.js";
 
 const uuid = (n: string) => `018f1f4e-8d5f-7abc-8123-123456789${n.padStart(3, "0")}`;
@@ -17,7 +17,7 @@ export const commandFixtures = [
   { ...base, commandId: command("101"), type: CommandTypes.ConversationCreate, payload: { title: "Demo" } },
   { ...base, commandId: command("102"), type: CommandTypes.SessionCreate, payload: { provider: "test" } },
   { ...base, commandId: command("103"), type: CommandTypes.TurnSubmit, turnId: fixtureIds.turnId, payload: { input: "hello" } },
-  { ...base, commandId: command("104"), type: CommandTypes.ApprovalResolve, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, approvalId: fixtureIds.approvalId, payload: { decision: "allow" } },
+  { ...base, commandId: command("104"), type: CommandTypes.ApprovalResolve, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, approvalId: fixtureIds.approvalId, payload: { decision: ApprovalDecisions.Allow } },
   { ...base, commandId: command("105"), idempotencyKey: "duplicate-turn-cancel", type: CommandTypes.TurnCancel, turnId: fixtureIds.turnId, payload: { reason: "user" } },
   { ...base, commandId: command("106"), type: CommandTypes.ToolCancel, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, payload: { reason: "timeout" } }
 ] satisfies CommandEnvelope[];
@@ -34,7 +34,7 @@ export const durableFixtures = [
   { ...base, recordId: record("208"), sequence: 8, type: DurableRecordTypes.ProviderStepFailed, turnId: fixtureIds.turnId, stepId: fixtureIds.stepId, payload: { error } },
   { ...base, recordId: record("209"), sequence: 9, type: DurableRecordTypes.ToolRequested, turnId: fixtureIds.turnId, stepId: fixtureIds.stepId, toolCallId: fixtureIds.toolCallId, payload: { name: "sh", input: { command: "pwd" }, providerOrder: 0, requiresApproval: true, providerToolCallId: "provider-call-0" } },
   { ...base, recordId: record("210"), sequence: 10, type: DurableRecordTypes.ApprovalRequested, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, approvalId: fixtureIds.approvalId, payload: { reason: "run command" } },
-  { ...base, recordId: record("211"), sequence: 11, type: DurableRecordTypes.ApprovalResolved, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, approvalId: fixtureIds.approvalId, payload: { decision: "allow" } },
+  { ...base, recordId: record("211"), sequence: 11, type: DurableRecordTypes.ApprovalResolved, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, approvalId: fixtureIds.approvalId, payload: { decision: ApprovalDecisions.Allow } },
   { ...base, recordId: record("212"), sequence: 12, type: DurableRecordTypes.ToolResultCompleted, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, payload: { output: "ok", cancellation: { requested: true, reason: "stop after completion" } } },
   { ...base, recordId: record("213"), sequence: 13, type: DurableRecordTypes.ToolResultFailed, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, payload: { error, cancellation: { requested: true, reason: "cancelled" } } },
   { ...base, recordId: record("214"), sequence: 14, type: DurableRecordTypes.ToolResultDenied, turnId: fixtureIds.turnId, toolCallId: fixtureIds.toolCallId, payload: { error: { ...error, code: "DENIED" }, synthetic: true } },

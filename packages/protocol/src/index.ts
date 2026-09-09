@@ -96,11 +96,16 @@ export enum LiveEventTypes {
   StderrDelta = "stderr.delta"
 }
 
+export enum ApprovalDecisions {
+  Allow = "allow",
+  Deny = "deny"
+}
+
 export interface CommandPayloads {
   [CommandTypes.ConversationCreate]: { readonly title?: string };
   [CommandTypes.SessionCreate]: { readonly provider?: string };
   [CommandTypes.TurnSubmit]: { readonly input: string };
-  [CommandTypes.ApprovalResolve]: { readonly decision: "allow" | "deny"; readonly reason?: string };
+  [CommandTypes.ApprovalResolve]: { readonly decision: ApprovalDecisions; readonly reason?: string };
   [CommandTypes.TurnCancel]: { readonly reason?: string };
   [CommandTypes.ToolCancel]: { readonly reason?: string };
 }
@@ -115,7 +120,7 @@ export interface DurablePayloads {
   [DurableRecordTypes.ProviderStepFailed]: { readonly error: SerializedError };
   [DurableRecordTypes.ToolRequested]: { readonly name: string; readonly input: JsonValue; readonly providerOrder: number; readonly requiresApproval: boolean; readonly providerToolCallId?: string };
   [DurableRecordTypes.ApprovalRequested]: { readonly reason: string };
-  [DurableRecordTypes.ApprovalResolved]: { readonly decision: "allow" | "deny"; readonly reason?: string };
+  [DurableRecordTypes.ApprovalResolved]: { readonly decision: ApprovalDecisions; readonly reason?: string };
   [DurableRecordTypes.ToolResultCompleted]: { readonly output: JsonValue; readonly synthetic?: false; readonly cancellation?: CancellationMetadata };
   [DurableRecordTypes.ToolResultFailed]: { readonly error: SerializedError; readonly synthetic?: boolean; readonly cancellation?: CancellationMetadata };
   [DurableRecordTypes.ToolResultDenied]: { readonly error: SerializedError; readonly synthetic?: boolean };
@@ -139,7 +144,7 @@ export interface LivePayloads {
   [LiveEventTypes.ToolCompleted]: { readonly output?: JsonValue };
   [LiveEventTypes.ToolFailed]: { readonly error: SerializedError };
   [LiveEventTypes.ApprovalRequested]: { readonly reason: string };
-  [LiveEventTypes.ApprovalResolved]: { readonly decision: "allow" | "deny" };
+  [LiveEventTypes.ApprovalResolved]: { readonly decision: ApprovalDecisions };
   [LiveEventTypes.StdoutDelta]: { readonly text: string };
   [LiveEventTypes.StderrDelta]: { readonly text: string };
 }

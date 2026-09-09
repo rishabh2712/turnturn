@@ -1,4 +1,4 @@
-import { CommandTypes, DurableRecordTypes, LiveEventTypes } from "../src/index.js";
+import { ApprovalDecisions, CommandTypes, DurableRecordTypes, LiveEventTypes } from "../src/index.js";
 import type { CommandEnvelope, DurableRecord, DurableRecordDraft, LiveEvent, ConversationId, SessionId, TurnId, StepId, ToolCallId, ApprovalId, CommandId, RecordId, EventId } from "../src/index.js";
 
 declare const conversationId: ConversationId;
@@ -35,7 +35,7 @@ const persisted: DurableRecord<DurableRecordTypes.ToolRequested> = { ...draft, s
 const { sessionId: omittedSession, ...withoutSession } = persisted;
 // @ts-expect-error every durable record requires session scope
 const missingDurableSession: DurableRecord = withoutSession;
-const approval: CommandEnvelope<CommandTypes.ApprovalResolve> = { ...command, type: CommandTypes.ApprovalResolve, toolCallId, approvalId, payload: { decision: "allow" } };
+const approval: CommandEnvelope<CommandTypes.ApprovalResolve> = { ...command, type: CommandTypes.ApprovalResolve, toolCallId, approvalId, payload: { decision: ApprovalDecisions.Allow } };
 const { approvalId: omittedApproval, ...withoutApproval } = approval;
 const { toolCallId: omittedTool, ...withoutTool } = approval;
 // @ts-expect-error approval resolution requires its approval ID
@@ -43,11 +43,11 @@ const missingApproval: CommandEnvelope = withoutApproval;
 // @ts-expect-error approval resolution requires its tool ID independently
 const missingTool: CommandEnvelope = withoutTool;
 // @ts-expect-error the default union must preserve the command/payload relationship
-const wrongCommandPayload: CommandEnvelope = { ...command, payload: { decision: "deny" } };
+const wrongCommandPayload: CommandEnvelope = { ...command, payload: { decision: ApprovalDecisions.Deny } };
 // @ts-expect-error the default durable union must preserve the type/payload relationship
 const wrongRecordPayload: DurableRecord = { ...persisted, payload: { content: "wrong" } };
 // @ts-expect-error the default live union must preserve the type/payload relationship
-const wrongLivePayload: LiveEvent = { ...live, payload: { decision: "allow" } };
+const wrongLivePayload: LiveEvent = { ...live, payload: { decision: ApprovalDecisions.Allow } };
 
 declare const anyRecord: DurableRecord;
 if (anyRecord.type === DurableRecordTypes.ToolRequested) {

@@ -16,9 +16,9 @@
 
 - [x] Define protocol types for `CommandEnvelope`, `DurableRecord`, `LiveEvent`, typed IDs, structured errors, and supported v1 record/command types.
 - [x] Add JSON round-trip fixtures for command envelopes, durable records, live events, and structured errors.
-- [ ] Implement append-only JSONL session log writer with writer-assigned sequence and duplicate `recordId` handling.
-- [ ] Implement JSONL reader with corrupt trailing-record recovery and strict required-metadata validation.
-- [ ] Implement engine-state reducer for turn/tool/approval state.
+- [x] Implement append-only JSONL session log writer with writer-assigned sequence and duplicate `recordId` handling.
+- [x] Implement JSONL reader with corrupt trailing-record recovery and strict required-metadata validation.
+- [x] Implement engine-state reducer for turn/tool/approval state.
 - [ ] Implement provider-history reducer for model-visible history.
 - [ ] Implement command idempotency semantics for duplicate submit, approval, and cancellation commands.
 - [ ] Implement approval/cancellation race fixtures.

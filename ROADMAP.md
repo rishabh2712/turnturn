@@ -91,7 +91,7 @@ Exit criteria:
 
 ## Milestone 2: Protocol and Event Log Contract Gate
 
-Status: in progress. Protocol types and JSON serialization fixtures are implemented; storage, replay, idempotency, and lifecycle race validation remain open in OpenSpec.
+Status: in progress. Protocol types, JSON serialization fixtures, JSONL writer/reader storage, and engine-state replay are implemented; provider-history replay, idempotency, and lifecycle race validation remain open in OpenSpec.
 
 Goal: define and implement canonical IDs, messages, events, statuses, errors, serialization fixtures, replay fixtures, and append-only persistence before engine scaffolding depends on them.
 

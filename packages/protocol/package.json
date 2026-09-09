@@ -8,15 +8,29 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./session-log": {
+      "types": "./dist/session-log.d.ts",
+      "import": "./dist/session-log.js"
+    },
+    "./engine-state": {
+      "types": "./dist/engine-state.d.ts",
+      "import": "./dist/engine-state.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.type-tests.json --noEmit",
     "test": "pnpm build && node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "24.9.1",
     "typescript": "5.9.2"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
   }
 }

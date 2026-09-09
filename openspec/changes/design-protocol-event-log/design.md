@@ -294,7 +294,7 @@ Opaque provider request/response IDs may be stored as string metadata.
 Implementation choices and tradeoffs:
 
 - The initial wire schema uses numeric `schemaVersion: 1`. Runtime version checks and future-version rejection must be implemented with the reader/transport decoders; the current serializer validates JSON representation only.
-- Use explicit TypeScript string enums for protocol discriminators, with enum values equal to the stable persisted JSON wire strings. This keeps implementation code centralized around symbols such as `CommandTypes.TurnSubmit` while preserving readable logs such as `"turn.submit"`. Numeric or implicit enum values are forbidden.
+- Use explicit TypeScript string enums for protocol discriminators, approval decisions, reducer statuses, and issue codes, with enum values equal to the stable persisted or observable strings. This keeps implementation code centralized around symbols such as `CommandTypes.TurnSubmit` and `ToolStatuses.Completed` while preserving readable logs such as `"turn.submit"` and `"completed"`. Numeric or implicit enum values are forbidden.
 - Use discriminated TypeScript unions with payloads and required scope IDs per message type. This follows the tagged messages observed in the reference implementations and catches mismatched payloads during development. Type checking does not replace runtime validation of untrusted transport input or persisted records.
 - Keep writer-assigned `sequence` out of durable drafts and live events. This makes the ordering ownership explicit before the log writer is implemented.
 - Keep ID formatting/parsing separate from ID generation. Codex's `protocol/src/response_item_id.rs` makes this distinction; the runtime must supply UUIDv7 IDs when creating new records. A formatter alone does not guarantee uniqueness or time ordering.
@@ -302,6 +302,51 @@ Implementation choices and tradeoffs:
 - Preserve a provider's tool-call ID only as opaque string metadata alongside the canonical tool ID. This supports later adapter pairing without importing SDK objects into the protocol.
 
 The engine implementation gate remains closed until the remaining storage, replay, idempotency, and race fixtures pass.
+
+## JSONL Storage Slice
+
+`packages/protocol/src/session-log.ts` implements the first durable writer/reader boundary as a separate package subpath, `@turnturn/protocol/session-log`, so the core protocol entry point does not import storage.
+
+Decision:
+
+- Use Zod for runtime envelope validation at the storage boundary.
+- Keep storage-specific validation limited to schema version, discriminator, required metadata, semantic ID prefixes, JSON safety, monotonic sequence, duplicate `recordId`, and corrupt-tail handling.
+- Leave lifecycle validation, tool-result pairing, command idempotency outcomes, and provider-history reconstruction to the reducer tasks.
+
+How we got there:
+
+- The protocol enums and durable record families are now present, so writing records exercises the contract without requiring the engine.
+- Codex's rollout storage keeps persistence/read concerns separate from app-server and renderer behavior.
+- agentic-code's session JSONL path reinforces that durable append logs should be directly inspectable and resumable.
+- The user explicitly preferred Zod over hand-written runtime checking.
+
+Tradeoffs:
+
+- Zod adds a runtime dependency but prevents one-off validators from quietly drifting away from the envelope contract.
+- Exporting storage as a subpath makes imports slightly more explicit but avoids an ESM cycle where `index.ts` exports storage while storage imports protocol values.
+- The reader reports invalid metadata instead of attempting repair for non-tail corruption; this is stricter now and leaves any future repair mode explicit.
+
+## Engine-State Reducer Slice
+
+`packages/protocol/src/engine-state.ts` implements the first recovery projection over durable records.
+
+Decision:
+
+- Reconstruct conversation, session, turn, provider-step, tool-call, and approval state from durable records.
+- Report reducer issues without throwing for recoverable state inspection.
+- Detect missing parents, duplicate entities, out-of-order sequences, and terminal-state mutations.
+- Keep model-visible provider history out of this reducer; it belongs to the provider-history reducer task.
+
+How we got there:
+
+- The storage reader can now return ordered durable records, so the next pressure test is whether those records are enough to recover engine lifecycle state.
+- Codex's rollout architecture separates persisted records from projections; this slice follows that split.
+- Keeping reducer issues as data gives future CLI/debug renderer and tests a way to inspect broken logs without crashing the whole recovery path immediately.
+
+Tradeoffs:
+
+- The reducer records issues and continues where possible, which is useful for observability but means callers must check `issues` before treating state as valid.
+- It validates lifecycle shape only at the state level. Tool-result pairing, synthetic-result policy, command idempotency outcomes, and provider-message reconstruction remain explicit later tasks.
 
 ## Fixture Requirements
 
