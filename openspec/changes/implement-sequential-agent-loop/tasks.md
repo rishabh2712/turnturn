@@ -79,8 +79,8 @@ Race cases, each needing a test that a naive implementation fails:
 
 - [x] Cancel during provider streaming — abort the provider, give outstanding requests `aborted` results, then `turn.aborted`. The turn must not later flip to `completed` because an in-flight step resolved after the cancel.
 - [x] Cancel during tool execution — the tool's outcome must not overwrite the aborted terminal record. Once a call has a terminal record, further writes are dropped. `CancellationMetadata` exists so a tool that finished during cancellation is recorded truthfully.
-- [ ] Approval resolved after cancellation — rejected, nothing written, turn not resurrected.
-- [ ] Duplicate approval resolution — first wins, never two `approval.resolved` records for one approval.
+- [x] Approval resolved after cancellation — rejected, nothing written, turn not resurrected.
+- [x] Duplicate approval resolution — first wins, never two `approval.resolved` records for one approval.
 - [ ] Cancel before the turn starts, and after it completes — both rejected with a clear code, no second terminal record.
 
 Gotchas:
