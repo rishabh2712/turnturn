@@ -378,6 +378,46 @@ test("cancel during provider streaming waits for durable turn.aborted and ignore
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
 });
 
+test("cancel during tool execution records the finished outcome with cancellation metadata", async () => {
+  let toolStarted;
+  const toolStartedPromise = new Promise((resolve) => {
+    toolStarted = resolve;
+  });
+  const provider = new ScriptedProvider([
+    [
+      { type: "tool-call-complete", call: { callId: "native", name: "slow", input: { value: "work" } } },
+      { type: "completed", reason: "tool-use" },
+    ],
+  ]);
+  const tools = new MemoryToolExecutor(async (request) => {
+    toolStarted();
+    await new Promise((resolve) => request.signal.addEventListener("abort", resolve, { once: true }));
+    return completed({ finishedAfterAbort: true });
+  });
+  const { engine, durable } = await seededEngine({ provider, tools });
+  const running = engine.submit(command(CommandTypes.TurnSubmit, { input: "run slow" }, { turnId: ids.turnId }, 27));
+
+  await toolStartedPromise;
+  const cancel = await engine.submit(
+    command(CommandTypes.TurnCancel, { reason: "stop tool" }, { turnId: ids.turnId }, 28),
+  );
+  await running;
+
+  const completedTool = durable.records().find((record) => record.type === DurableRecordTypes.ToolResultCompleted);
+  assert.deepEqual(completedTool.payload, {
+    output: { finishedAfterAbort: true },
+    cancellation: { requested: true, reason: "stop tool" },
+  });
+  assert.equal(
+    durable.records().some((record) => record.type === DurableRecordTypes.ToolResultAborted),
+    false,
+  );
+  assert.equal(cancel.kind, "accepted");
+  assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnAborted);
+  assertEveryRequestedToolTerminated(durable.records());
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+});
+
 test("recoverable tool failure continues to the next provider step", async () => {
   const provider = new ScriptedProvider([
     [

@@ -1,6 +1,7 @@
 import {
   type ApprovalDecisions,
   type ApprovalId,
+  type CancellationMetadata,
   type CommandEnvelope,
   type ConversationId,
   DurableRecordTypes as Durable,
@@ -145,8 +146,12 @@ export class RecordEmitter {
     command: CommandEnvelope,
     scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId" | "toolCallId">>,
     output: JsonValue,
+    cancellation?: CancellationMetadata,
   ): Promise<DurableRecord<typeof Durable.ToolResultCompleted>> {
-    const record = await this.append(command, Durable.ToolResultCompleted, scope, { output });
+    const record = await this.append(command, Durable.ToolResultCompleted, scope, {
+      output,
+      ...optionalField("cancellation", cancellation),
+    });
     await this.publishLive(Live.ToolCompleted, scope, { output });
     return record;
   }
@@ -155,8 +160,12 @@ export class RecordEmitter {
     command: CommandEnvelope,
     scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId" | "toolCallId">>,
     error: SerializedError,
+    cancellation?: CancellationMetadata,
   ): Promise<DurableRecord<typeof Durable.ToolResultFailed>> {
-    const record = await this.append(command, Durable.ToolResultFailed, scope, { error });
+    const record = await this.append(command, Durable.ToolResultFailed, scope, {
+      error,
+      ...optionalField("cancellation", cancellation),
+    });
     await this.publishLive(Live.ToolFailed, scope, { error });
     return record;
   }

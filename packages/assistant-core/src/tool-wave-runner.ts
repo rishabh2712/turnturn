@@ -172,21 +172,14 @@ export class ToolWaveRunner {
       outcome = { kind: "failed", error: serializeThrown(error, "TOOL_EXECUTOR_THROWN") };
     }
 
-    if (running.isCancelled) {
-      await this.options.records.toolAborted(
-        command,
-        { ...command, toolCallId },
-        syntheticError("TURN_CANCELLED", "Turn cancelled"),
-      );
-      return;
-    }
+    const cancellation = running.isCancelled ? cancellationMetadata(running.cancelReason) : undefined;
 
     if (outcome.kind === "completed") {
-      await this.options.records.toolCompleted(command, { ...command, toolCallId }, outcome.output);
+      await this.options.records.toolCompleted(command, { ...command, toolCallId }, outcome.output, cancellation);
       return;
     }
 
-    await this.options.records.toolFailed(command, { ...command, toolCallId }, outcome.error);
+    await this.options.records.toolFailed(command, { ...command, toolCallId }, outcome.error, cancellation);
   }
 
   private async recordSkippedToolAbort(
@@ -227,6 +220,10 @@ function serializeThrown(error: unknown, code: string): SerializedError {
 
 function syntheticError(code: string, message: string): SerializedError {
   return { code, message, retryable: false, fatal: false };
+}
+
+function cancellationMetadata(reason: string | undefined): { readonly requested: true; readonly reason?: string } {
+  return reason === undefined ? { requested: true } : { requested: true, reason };
 }
 
 function assertNeverPolicyDecision(decision: never): never {
