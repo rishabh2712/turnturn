@@ -8,3 +8,4 @@ export * from "./testing.js";
 export * from "./tool-wave-runner.js";
 export * from "./turn-runner.js";
 export * from "./turn-runtime.js";
+export * from "./workspace-tools.js";

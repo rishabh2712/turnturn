@@ -94,18 +94,18 @@ Gotchas:
 
 `read`, `write`, `edit`, `glob`, `grep`, `shell`. Nothing else — `ls`, read-many-files, background shell, ask-user, todos, plan mode, and web access are v1.x.
 
-- [ ] Workspace confinement: every path resolves to an absolute real path inside a configured root. Resolve symlinks **before** checking. Refusal is a `failed` outcome. Test both a `..` escape and a symlink escape.
-- [ ] `read` with line-numbered output and offset/limit; binary or non-UTF8 files fail cleanly.
-- [ ] `write` full-content, reporting bytes written.
-- [ ] `edit` **exact match only**: not-found and multiple-match-without-`replaceAll` each fail with a distinct code and leave the file byte-identical. Assert by comparing bytes before and after. No fuzzy or anchored matching — that is Milestone 6, and these error codes are the data that designs it, so make them specific.
-- [ ] `glob` newest-first, capped.
-- [ ] `grep` returning structured matches (path, line number, line), not a formatted blob. `ripgrep` is not guaranteed present; prefer a Node implementation.
-- [ ] `shell`: stream output through the invocation callbacks, honour `AbortSignal` by killing the **process group**, enforce a timeout distinguishable from a non-zero exit, default to the workspace root.
-- [ ] `mutating: true` on `write`, `edit`, `shell` — the v1.x parallel scheduler reads it.
-- [ ] Deterministic output truncation, flagged in the result.
-- [ ] `AGENTS.md` discovery: walk root-to-file, nearest-last so specific instructions win. Reference: `codex/codex-rs/core/src/agents_md.rs`.
-- [ ] `@file` mention resolution; an unresolvable mention stays literal rather than erroring the turn. Reference: `codex/codex-rs/core/src/mention_syntax.rs`.
-- [ ] Prove an edit lands verifiably on disk in a real repository.
+- [x] Workspace confinement: every path resolves to an absolute real path inside a configured root. Resolve symlinks **before** checking. Refusal is a `failed` outcome. Test both a `..` escape and a symlink escape.
+- [x] `read` with line-numbered output and offset/limit; binary or non-UTF8 files fail cleanly.
+- [x] `write` full-content, reporting bytes written.
+- [x] `edit` **exact match only**: not-found and multiple-match-without-`replaceAll` each fail with a distinct code and leave the file byte-identical. Assert by comparing bytes before and after. No fuzzy or anchored matching — that is Milestone 6, and these error codes are the data that designs it, so make them specific.
+- [x] `glob` newest-first, capped.
+- [x] `grep` returning structured matches (path, line number, line), not a formatted blob. `ripgrep` is not guaranteed present; prefer a Node implementation.
+- [x] `shell`: stream output through the invocation callbacks, honour `AbortSignal` by killing the **process group**, enforce a timeout distinguishable from a non-zero exit, default to the workspace root.
+- [x] `mutating: true` on `write`, `edit`, `shell` — the v1.x parallel scheduler reads it.
+- [x] Deterministic output truncation, flagged in the result.
+- [x] `AGENTS.md` discovery: walk root-to-file, nearest-last so specific instructions win. Reference: `codex/codex-rs/core/src/agents_md.rs`.
+- [x] `@file` mention resolution; an unresolvable mention stays literal rather than erroring the turn. Reference: `codex/codex-rs/core/src/mention_syntax.rs`.
+- [x] Prove an edit lands verifiably on disk in a real repository.
 
 Gotchas:
 

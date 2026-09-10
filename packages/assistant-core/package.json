@@ -44,6 +44,10 @@
     "./engine": {
       "types": "./dist/engine.d.ts",
       "import": "./dist/engine.js"
+    },
+    "./workspace-tools": {
+      "types": "./dist/workspace-tools.d.ts",
+      "import": "./dist/workspace-tools.js"
     }
   },
   "files": [
