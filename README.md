@@ -2,25 +2,29 @@
 
 turnturn is a coding assistant. Development starts with a provider-neutral harness and serialized engine/client contracts.
 
-## Current Machine Status
+## Toolchain
 
-This machine has Apple Command Line Tools installed. Node.js and pnpm are installed locally under:
-
-```sh
-~/.local/turnturn-toolchain/node-current
-```
-
-Homebrew is not installed because this macOS user does not currently have sudo/admin access. To use the local toolchain in a new shell, make sure `~/.zshrc` is loaded or run:
+No Homebrew — this macOS user has no sudo/admin access. Node and pnpm are installed locally, and there is **no `~/.zshrc`**, so nothing is on `PATH` by default. Add it per shell:
 
 ```sh
-source ~/.zshrc
+export PATH="$HOME/.local/turnturn-node-v24.21.0/bin:$HOME/.local/turnturn-bin:$PATH"
+node --version   # v24.21.0
+pnpm --version   # 9.12.3
 ```
+
+`python3` (3.9.6) and `curl` are available system-wide.
 
 ## Start Here
 
-- [ROADMAP.md](ROADMAP.md): milestone order and completion criteria.
-- [OpenSpec project context](openspec/project.md): boundaries, reference discovery, and working rules.
-- [Architecture skill](.agents/skills/turnturn-architecture/SKILL.md): research, challenge, synthesis, and implementation discipline.
-- [Protocol and event log tasks](openspec/changes/design-protocol-event-log/tasks.md): current implementation work; design and raw research live in the same change.
+- [ROADMAP.md](ROADMAP.md) — v1 scope, milestone order, and what is deferred.
+- [OpenSpec project context](openspec/project.md) — working rules, the design-review requirement, and the one-home-per-fact rule.
+- [Architecture skill](.agents/skills/turnturn-architecture/SKILL.md) — where things live and what discipline applies.
+- [Current change](openspec/changes/implement-sequential-agent-loop/) — Milestone 3, the sequential agent loop. Design is written and awaiting review; implementation has not started.
 
-Update the roadmap when a milestone completes. Do not commit unless explicitly asked.
+## Rules
+
+- Every change has a `design.md`, reviewed before implementation starts.
+- Each fact has one home. Link, do not restate.
+- `packages/protocol` is frozen; changing it needs its own change with full research.
+- Update the roadmap when a milestone completes.
+- Do not commit unless explicitly asked.

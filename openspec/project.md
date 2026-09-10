@@ -19,9 +19,11 @@ Reference repos are discovered relative to the turnturn repo root. In the expect
 
 - `../codex`
 - `../gemini-cli`
-- `../agentic-code`
+- `../claude-code`
 
 Agents should first resolve the turnturn repo root, then check these sibling paths. If a sibling repo is missing, record that limitation in the research artifact instead of hardcoding a machine-specific absolute path.
+
+Research artifacts created before 2026-09-09 refer to this third reference as `agentic-code`. That is the same reference under its former name; existing `research/agentic-code.md` files are not renamed.
 
 Use these repos as design evidence. Do not copy their structure wholesale.
 
@@ -29,20 +31,39 @@ Use these repos as design evidence. Do not copy their structure wholesale.
 
 - Codex is the strongest reference for conceptual harness layering.
 - Gemini CLI is the strongest reference for TypeScript SDK and typed tool ergonomics.
-- agentic-code is the strongest reference for operational loop invariants and conversation lifecycle robustness.
+- claude-code is the strongest reference for operational loop invariants and conversation lifecycle robustness.
 
-The intended blend is Codex-inspired boundaries, Gemini-inspired ergonomics, and agentic-code-inspired operational invariants.
+The intended blend is Codex-inspired boundaries, Gemini-inspired ergonomics, and claude-code-inspired operational invariants.
 
 ## Required Design Phase
 
-Before implementing a major harness milestone:
+**Every change has a `design.md`, and the user reviews it before implementation starts.** There is no exception. A change whose design has not been validated does not get built, however small it looks.
 
-1. Create or update an OpenSpec change.
-2. Preserve raw explorer reports in the change's `research/` folder.
-3. Run a neutral challenge that questions the proposed path.
-4. Write synthesis with conflicts, tradeoffs, rejected options, and open questions.
-5. Update the change design with the conclusion.
-6. Update `ROADMAP.md` when the milestone status changes.
+Every change therefore has:
+
+1. `proposal.md` — why this change exists.
+2. `design.md` — the decisions, with the reasoning and the rejected options.
+3. `tasks.md` — what to do, with conventions, acceptance criteria, and gotchas inline.
+4. `research/research.md` — what is being borrowed and from which reference file.
+5. A `ROADMAP.md` update when milestone status changes.
+
+**Contract-altering changes** — protocol types, durable record formats, persisted policy semantics, public package APIs — additionally need `research/neutral-challenge.md` questioning the proposed path, and `research/synthesis.md` recording conflicts, tradeoffs, rejected options, and open questions. The full ritual exists for decisions that are irreversible and have no empirical feedback available; implementation work resolves empirically instead, by running code.
+
+Do not write separate handoff documents. Implementation instructions belong in `tasks.md`, written so another model can execute them without the authoring conversation.
+
+## One Home Per Fact
+
+Duplicated information is the main way this repo becomes unreadable. Assign every fact one owner and link to it:
+
+| File | Owns |
+| --- | --- |
+| `ROADMAP.md` | v1 scope, milestone order, deferred lists |
+| `<change>/proposal.md` | why the change exists |
+| `<change>/design.md` | decisions and tradeoffs |
+| `<change>/tasks.md` | the work, and how to do it |
+| `openspec/specs/` | accepted behavior |
+
+Do not restate a milestone's scope inside its proposal, or its decisions inside its tasks. When a change is complete and its output lives in code and the roadmap, delete the change rather than leaving it beside live work.
 
 ## Agent Model Routing
 

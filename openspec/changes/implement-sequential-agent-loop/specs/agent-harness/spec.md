@@ -45,3 +45,36 @@ turnturn SHALL keep recoverable tool failures inside the turn loop.
 - **WHEN** a tool executor returns a recoverable error
 - **THEN** the engine records a failed terminal tool result
 - **AND** the provider can receive that result in a later step.
+
+### Requirement: Real Provider Turn
+turnturn SHALL complete a turn against a real streaming provider, not only a scripted one.
+
+#### Scenario: Provider interleaves text and tool calls
+- **WHEN** a real provider stream interleaves assistant text with tool-call argument fragments
+- **THEN** the adapter assembles a complete tool call before the engine dispatches it
+- **AND** an unparseable argument buffer produces a terminal outcome rather than a dispatched call or a parse exception.
+
+### Requirement: Core Tool Set
+turnturn SHALL provide read, write, edit, glob, grep, and shell tools confined to the workspace.
+
+#### Scenario: Model edits a file
+- **WHEN** the model requests an edit inside the workspace
+- **THEN** the change is shown as a diff before it is applied
+- **AND** the result is verifiable on disk or reported as a structured failure with no partial write.
+
+#### Scenario: Path escapes the workspace
+- **WHEN** a tool call resolves outside the configured workspace roots, including via a symlink
+- **THEN** the call is refused before execution.
+
+### Requirement: Serialized Client Boundary
+turnturn SHALL deliver commands and events to local clients through the same serialized shape a remote client would use.
+
+#### Scenario: Renderer observes a turn
+- **WHEN** a renderer subscribes to a running turn
+- **THEN** every command and message crosses the transport as serialized JSON
+- **AND** a payload that cannot be serialized fails at the boundary rather than reaching the renderer.
+
+#### Scenario: Subscriber resumes
+- **WHEN** a subscriber resumes after a gap
+- **THEN** it receives the durable records it missed, ordered by durable sequence
+- **AND** it does not receive live events emitted during the gap.

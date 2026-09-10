@@ -1,39 +1,25 @@
-# Proposal: Implement Sequential Agent Loop
+# Proposal: Sequential Agent Loop
 
-## Summary
+Milestone 3. Scope in `ROADMAP.md`, decisions in `design.md`, work in `tasks.md`.
 
-Implement turnturn's first executable engine loop through the protocol/event-log contracts.
+## Why
 
-Milestone 3 proves that a local engine can accept canonical commands, run a scripted provider, execute requested tools sequentially, evaluate policy gates, and emit durable records plus live events without depending on renderer callbacks or provider-native durable state.
+Milestone 2 defined the protocol and replay substrate. The open risk is whether real engine code stays inside that shape once provider steps, tool requests, approvals, cancellation, and recoverable errors enter the loop.
 
-## Motivation
+A scripted provider cannot answer that. It validates the contract against our own assumptions, not against provider reality — partial tool-call JSON, interleaved text and tool deltas, mid-stream refusals, and context limits reached inside a turn are shapes it never produces. The same holds for tools: an edit that does not apply is the most common real failure, and no scripted tool surfaces it.
 
-Milestone 2 defined the protocol and replay substrate. The next risk is whether real engine code can stay inside that shape once provider steps, tool requests, approvals, cancellation, and recoverable errors enter the loop.
+So this milestone is a vertical slice rather than a layer. If the plan is wrong, it is wrong after there is a working agent rather than before.
 
-This milestone intentionally starts with a scripted provider so we can test lifecycle correctness before introducing real model-provider adapters.
+## What Changes
 
-## Scope
+A new `packages/assistant-core` holding the engine, its ports, the six tools, one real provider adapter, and an in-process transport; plus a minimal CLI renderer in `apps/cli`.
 
-- Scaffold `packages/assistant-core` as the engine package.
-- Define provider, tool executor, policy, ID, clock, durable sink, and live sink ports.
-- Implement conversation/session creation through command envelopes.
-- Implement one sequential turn path with a scripted provider.
-- Execute tool calls one at a time in provider order.
-- Persist canonical durable records before publishing corresponding live terminal events.
-- Preserve recoverable tool failures as terminal tool-result records where safe.
-- Implement duplicate command, approval/cancellation race, and same-step sibling behavior now that command application exists.
+Milestone 2's contract is not reopened.
 
 ## Non-Goals
 
-- Real OpenAI/Gemini/provider adapters.
-- Remote transport, HTTP, SSE, or WebSocket.
-- CLI/debug renderer.
-- Parallel tool waves.
-- Memory consolidation or subagents.
+Milestone 4 owns persisted allow/deny rules, shell command classification, and sandboxing. Milestone 5 owns compaction and token budgeting. Milestone 6 owns fuzzy edit matching. Milestone 7 owns hydration and resume. Additional providers, model routing, parallel tool waves, MCP, subagents, skills, and memory are v1.x or later.
 
-## Inputs
+## Status
 
-- `ROADMAP.md`
-- `openspec/project.md`
-- `openspec/changes/design-harness-boundaries/`
-- `openspec/changes/design-protocol-event-log/`
+Design approved 2026-09-10; implementation starts at T1. An earlier implementation attempt was removed unreviewed; see `design.md`, "Prior Attempt, Removed".
