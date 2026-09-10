@@ -11,7 +11,7 @@ import {
   LiveEventTypes,
 } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
-import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
+import { ProviderHistoryItemTypes, reduceProviderHistory } from "@turnturn/protocol/provider-history";
 import { createAssistantEngine } from "../dist/engine.js";
 import {
   completed,
@@ -122,6 +122,54 @@ test("same-step tool calls execute strictly in provider order", async () => {
     requests.map((record) => record.payload.providerOrder),
     [0, 1],
   );
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+  assertEveryRequestedToolTerminated(durable.records());
+});
+
+test("mixed sibling tool success and denial both reach the next provider step", async () => {
+  const histories = [];
+  const provider = {
+    name: "history-probe",
+    async *run(request) {
+      histories.push(request.history);
+      if (histories.length === 1) {
+        yield { type: "tool-call-complete", call: { callId: "native-ok", name: "ok", input: { value: "ok" } } };
+        yield { type: "tool-call-complete", call: { callId: "native-deny", name: "deny", input: { value: "deny" } } };
+        yield { type: "completed", reason: "tool-use" };
+        return;
+      }
+      yield { type: "completed", reason: "complete" };
+    },
+  };
+  const policy = {
+    async decide(request) {
+      if (request.name === "deny") return { kind: "deny", error: testError("DENIED", "denied") };
+      return { kind: "allow" };
+    },
+  };
+  const tools = new MemoryToolExecutor((request) => completed({ echoed: request.name }));
+  const { engine, durable } = await seededEngine({ provider, policy, tools });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "run siblings" }, { turnId: ids.turnId }, 26));
+
+  assert.equal(histories.length, 2);
+  const secondStepToolItems = histories[1].items.filter((item) =>
+    [ProviderHistoryItemTypes.ToolRequest, ProviderHistoryItemTypes.ToolResult].includes(item.type),
+  );
+  assert.deepEqual(
+    secondStepToolItems.map((item) =>
+      item.type === ProviderHistoryItemTypes.ToolRequest ? ["request", item.name] : ["result", item.status],
+    ),
+    [
+      ["request", "ok"],
+      ["result", "completed"],
+      ["request", "deny"],
+      ["result", "denied"],
+    ],
+  );
+  assert.equal(tools.requests.length, 1);
+  assert.equal(tools.requests[0].name, "ok");
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
   assertEveryRequestedToolTerminated(durable.records());

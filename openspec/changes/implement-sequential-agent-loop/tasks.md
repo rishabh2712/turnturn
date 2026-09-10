@@ -69,7 +69,7 @@ The first loop slice works, but `engine.ts` became hard to reason about because 
 - [x] Durable-before-live ordering for terminal facts.
 - [x] Tool-use invariant: every `tool.requested` reaches exactly one terminal result — including under cancellation, provider failure, and shutdown. A model that sees a request with no result is looking at a malformed conversation.
 - [x] Recoverable tool failures continue the turn to completion.
-- [ ] Sibling isolation across mixed success and denial; both results reach the next step.
+- [x] Sibling isolation across mixed success and denial; both results reach the next step.
 - [x] Command idempotency: same `idempotencyKey` returns `duplicate` with the **original** records, not fresh ones. Commands without a key always apply; never dedupe on payload equality.
 - [x] Set `synthetic: true` on result records the engine produced rather than the tool — denial, abort, cancellation backfill. It is how replay tells a real tool error from a policy artifact.
 - [x] A throwing `LiveSink` subscriber does not fail the turn.
