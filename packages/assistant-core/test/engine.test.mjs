@@ -418,6 +418,33 @@ test("cancel during tool execution records the finished outcome with cancellatio
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
 });
 
+test("cancel before turn starts and after completion is rejected without another terminal record", async () => {
+  const { engine, durable } = await seededEngine();
+  const beforeStart = await engine.submit(
+    command(CommandTypes.TurnCancel, { reason: "too early" }, { turnId: ids.turnId }, 29),
+  );
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "finish" }, { turnId: ids.turnId }, 30));
+  const terminalCountAfterCompletion = terminalTurnRecords(durable.records()).length;
+  const afterComplete = await engine.submit(
+    command(CommandTypes.TurnCancel, { reason: "too late" }, { turnId: ids.turnId }, 31),
+  );
+
+  assert.deepEqual(beforeStart, {
+    kind: "rejected",
+    code: "TURN_NOT_RUNNING",
+    message: "Turn is not running",
+  });
+  assert.deepEqual(afterComplete, {
+    kind: "rejected",
+    code: "TURN_NOT_RUNNING",
+    message: "Turn is not running",
+  });
+  assert.equal(terminalTurnRecords(durable.records()).length, terminalCountAfterCompletion);
+  assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnCompleted);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+});
+
 test("recoverable tool failure continues to the next provider step", async () => {
   const provider = new ScriptedProvider([
     [
@@ -535,6 +562,14 @@ function assertEveryRequestedToolTerminated(records) {
     );
     assert.equal(terminals.length, 1, `expected exactly one terminal result for ${request.toolCallId}`);
   }
+}
+
+function terminalTurnRecords(records) {
+  return records.filter((record) =>
+    [DurableRecordTypes.TurnCompleted, DurableRecordTypes.TurnFailed, DurableRecordTypes.TurnAborted].includes(
+      record.type,
+    ),
+  );
 }
 
 async function waitForRecord(durable, type) {
