@@ -1,0 +1,65 @@
+{
+  "name": "@turnturn/assistant-core",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./approval-registry": {
+      "types": "./dist/approval-registry.d.ts",
+      "import": "./dist/approval-registry.js"
+    },
+    "./ports": {
+      "types": "./dist/ports.d.ts",
+      "import": "./dist/ports.js"
+    },
+    "./provider-step-runner": {
+      "types": "./dist/provider-step-runner.d.ts",
+      "import": "./dist/provider-step-runner.js"
+    },
+    "./records": {
+      "types": "./dist/records.d.ts",
+      "import": "./dist/records.js"
+    },
+    "./rejections": {
+      "types": "./dist/rejections.d.ts",
+      "import": "./dist/rejections.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./tool-wave-runner": {
+      "types": "./dist/tool-wave-runner.d.ts",
+      "import": "./dist/tool-wave-runner.js"
+    },
+    "./turn-runtime": {
+      "types": "./dist/turn-runtime.d.ts",
+      "import": "./dist/turn-runtime.js"
+    },
+    "./engine": {
+      "types": "./dist/engine.d.ts",
+      "import": "./dist/engine.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.type-tests.json --noEmit"
+  },
+  "dependencies": {
+    "@turnturn/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.9.1",
+    "typescript": "5.9.2"
+  }
+}

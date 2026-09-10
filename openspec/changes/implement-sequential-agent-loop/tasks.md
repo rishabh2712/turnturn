@@ -32,39 +32,52 @@ Copied from `packages/protocol`. Match them exactly; they are not obvious and th
 ## T0 — Prerequisites
 
 - [x] Node and pnpm installed. Node v24.21.0 under `~/.local/turnturn-node-v24.21.0`, pnpm 9.12.3 via Corepack in `~/.local/turnturn-bin`. `@turnturn/protocol` builds, typechecks, and its 26 tests pass.
-- [ ] **Add a formatter config** (Biome is one binary and one file) and wire it into `pnpm lint`. The previous attempt shipped a 1,320-character line because nothing prevented it.
+- [x] **Add a formatter config** (Biome is one binary and one file) and wire it into `pnpm lint`. The previous attempt shipped a 1,320-character line because nothing prevented it.
 - [x] Toolchain documented in `README.md`. The stale `HANDOFF.md` was deleted rather than refreshed; it duplicated the roadmap and the readme.
 
 ## T1 — Package and Ports
 
-- [ ] Create `packages/assistant-core`: `@turnturn/assistant-core`, ESM, `workspace:*` dependency on `@turnturn/protocol`, `typescript@5.9.2` and `@types/node@24.9.1` pinned to match the protocol package.
-- [ ] Define the seven ports from `design.md` Decision 1 in `src/ports.ts`.
-- [ ] Document on `ToolExecutorPort.execute` that tool-level failure is an outcome and a throw means a broken executor.
-- [ ] Ship in-memory doubles, exported for reuse: durable sink (calling `serializeJson` on every draft so unpersistable payloads fail in the fastest test), live sink, fixed clock, sequential ids, scripted provider built from `ProviderEvent[]` batches, and allow/deny/ask policies.
-- [ ] Exhaustiveness type-test on `ProviderEvent`, so adding a variant is a compile error.
-- [ ] Test: the memory sink rejects a draft carrying a `Date`, a class instance, or an `undefined` property value.
-- [ ] No loop logic in this task group.
+- [x] Create `packages/assistant-core`: `@turnturn/assistant-core`, ESM, `workspace:*` dependency on `@turnturn/protocol`, `typescript@5.9.2` and `@types/node@24.9.1` pinned to match the protocol package.
+- [x] Define the seven ports from `design.md` Decision 1 in `src/ports.ts`.
+- [x] Document on `ToolExecutorPort.execute` that tool-level failure is an outcome and a throw means a broken executor.
+- [x] Ship in-memory doubles, exported for reuse: durable sink (calling `serializeJson` on every draft so unpersistable payloads fail in the fastest test), live sink, fixed clock, sequential ids, scripted provider built from `ProviderEvent[]` batches, and allow/deny/ask policies.
+- [x] Exhaustiveness type-test on `ProviderEvent`, so adding a variant is a compile error.
+- [x] Test: the memory sink rejects a draft carrying a `Date`, a class instance, or an `undefined` property value.
+- [x] No loop logic in this task group.
 
 ## T2 — The Turn Loop
 
 Entry point: `submit(command: CommandEnvelope): Promise<CommandOutcome>` and `state(): EngineState`, with `CommandOutcome` being `accepted` / `duplicate` / `rejected`. `submit` resolves when the command is applied — for `turn.submit` that means the turn reached a terminal state — so concurrent `submit` calls must be supported. That concurrency is the source of every hard bug below.
 
-- [ ] Conversation, session, turn, and step lifecycle through command envelopes.
-- [ ] Happy path with the scripted provider, asserted as an exact record-type sequence.
-- [ ] Multiple same-step tool calls execute strictly in `providerOrder`, proven by an ordering probe rather than timing.
-- [ ] All five policy outcomes, each asserting its terminal tool status.
+### T2R — Refactor Before Race Cases
+
+The first loop slice works, but `engine.ts` became hard to reason about because command routing, provider collection, tool execution, protocol record construction, live publishing, approval waiting, and cancellation state all live in one construct. Split internals before adding the race cases.
+
+- [x] Record the maintainability concern: protocol record construction must not stay mixed with turn control flow.
+- [x] Extract an internal `RecordEmitter` that owns durable append, live publish, IDs, clock, append serialization, and live-sink isolation.
+- [x] Replace generic `records.append(type, scope, payload)` call sites with intent-named helpers such as `toolDenied`, `turnCompleted`, and `approvalRequested`.
+- [x] Extract `ProviderStepRunner`: collect provider events, accumulate text, classify provider failure, and return a step result without executing tools.
+- [x] Extract `ToolWaveRunner`: strict provider-order execution, policy decisions, approval waits, tool callbacks, synthetic terminal tool records, and sibling isolation.
+- [x] Extract `ApprovalRegistry`: pending approvals, first resolution wins, cancellation clears/rejects pending approvals, no turn resurrection.
+- [x] Extract a turn runtime / terminal guard that centralizes cancellation and “once terminal, no later write can overwrite it.”
+- [x] Re-run and extend T2 tests after each extraction; refactor commits must not widen the public port surface.
+
+- [x] Conversation, session, turn, and step lifecycle through command envelopes.
+- [x] Happy path with the scripted provider, asserted as an exact record-type sequence.
+- [x] Multiple same-step tool calls execute strictly in `providerOrder`, proven by an ordering probe rather than timing.
+- [x] All five policy outcomes, each asserting its terminal tool status.
 - [ ] Durable-before-live ordering for terminal facts.
-- [ ] Tool-use invariant: every `tool.requested` reaches exactly one terminal result — including under cancellation, provider failure, and shutdown. A model that sees a request with no result is looking at a malformed conversation.
-- [ ] Recoverable tool failures continue the turn to completion.
+- [x] Tool-use invariant: every `tool.requested` reaches exactly one terminal result — including under cancellation, provider failure, and shutdown. A model that sees a request with no result is looking at a malformed conversation.
+- [x] Recoverable tool failures continue the turn to completion.
 - [ ] Sibling isolation across mixed success and denial; both results reach the next step.
-- [ ] Command idempotency: same `idempotencyKey` returns `duplicate` with the **original** records, not fresh ones. Commands without a key always apply; never dedupe on payload equality.
-- [ ] Set `synthetic: true` on result records the engine produced rather than the tool — denial, abort, cancellation backfill. It is how replay tells a real tool error from a policy artifact.
-- [ ] A throwing `LiveSink` subscriber does not fail the turn.
-- [ ] `reduceProviderHistory(records)` pairs every request with a result, no issues.
+- [x] Command idempotency: same `idempotencyKey` returns `duplicate` with the **original** records, not fresh ones. Commands without a key always apply; never dedupe on payload equality.
+- [x] Set `synthetic: true` on result records the engine produced rather than the tool — denial, abort, cancellation backfill. It is how replay tells a real tool error from a policy artifact.
+- [x] A throwing `LiveSink` subscriber does not fail the turn.
+- [x] `reduceProviderHistory(records)` pairs every request with a result, no issues.
 
 Race cases, each needing a test that a naive implementation fails:
 
-- [ ] Cancel during provider streaming — abort the provider, give outstanding requests `aborted` results, then `turn.aborted`. The turn must not later flip to `completed` because an in-flight step resolved after the cancel.
+- [x] Cancel during provider streaming — abort the provider, give outstanding requests `aborted` results, then `turn.aborted`. The turn must not later flip to `completed` because an in-flight step resolved after the cancel.
 - [ ] Cancel during tool execution — the tool's outcome must not overwrite the aborted terminal record. Once a call has a terminal record, further writes are dropped. `CancellationMetadata` exists so a tool that finished during cancellation is recorded truthfully.
 - [ ] Approval resolved after cancellation — rejected, nothing written, turn not resurrected.
 - [ ] Duplicate approval resolution — first wins, never two `approval.resolved` records for one approval.
