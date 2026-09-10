@@ -66,7 +66,7 @@ The first loop slice works, but `engine.ts` became hard to reason about because 
 - [x] Happy path with the scripted provider, asserted as an exact record-type sequence.
 - [x] Multiple same-step tool calls execute strictly in `providerOrder`, proven by an ordering probe rather than timing.
 - [x] All five policy outcomes, each asserting its terminal tool status.
-- [ ] Durable-before-live ordering for terminal facts.
+- [x] Durable-before-live ordering for terminal facts.
 - [x] Tool-use invariant: every `tool.requested` reaches exactly one terminal result — including under cancellation, provider failure, and shutdown. A model that sees a request with no result is looking at a malformed conversation.
 - [x] Recoverable tool failures continue the turn to completion.
 - [ ] Sibling isolation across mixed success and denial; both results reach the next step.

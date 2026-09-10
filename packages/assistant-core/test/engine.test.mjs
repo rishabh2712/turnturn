@@ -8,6 +8,7 @@ import {
   formatConversationId,
   formatSessionId,
   formatTurnId,
+  LiveEventTypes,
 } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
@@ -382,6 +383,43 @@ test("throwing live sink does not fail the turn", async () => {
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
 });
 
+test("terminal live events are published only after their durable record exists", async () => {
+  const durable = new MemoryDurableSink();
+  const live = new OrderingLiveSink(durable);
+  const engine = createAssistantEngine({
+    provider: new ScriptedProvider([
+      [
+        { type: "tool-call-complete", call: { callId: "native", name: "probe", input: { value: "ok" } } },
+        { type: "completed", reason: "tool-use" },
+      ],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+    policy: new StaticPolicy(),
+    tools: new MemoryToolExecutor(() => completed({ value: "ok" })),
+    durable,
+    live,
+    ids: new SequentialIds(),
+    clock: new FixedClock(),
+  });
+
+  await engine.submit(command(CommandTypes.ConversationCreate, { title: "Demo" }, {}, 23));
+  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, {}, 24));
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "run" }, { turnId: ids.turnId }, 25));
+
+  const terminalObservations = live.observations.filter((observation) =>
+    [LiveEventTypes.ToolCompleted, LiveEventTypes.TurnCompleted].includes(observation.eventType),
+  );
+  assert.deepEqual(
+    terminalObservations.map((observation) => [observation.eventType, observation.durableAlreadyPresent]),
+    [
+      [LiveEventTypes.ToolCompleted, true],
+      [LiveEventTypes.TurnCompleted, true],
+    ],
+  );
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assertEveryRequestedToolTerminated(durable.records());
+});
+
 test("idempotency returns duplicate with original records", async () => {
   const { engine } = await seededEngine();
   const submit = command(CommandTypes.TurnSubmit, { input: "once" }, { turnId: ids.turnId }, 7, "turn-submit-once");
@@ -418,4 +456,51 @@ async function waitForRecord(durable, type) {
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error(`Timed out waiting for ${type}`);
+}
+
+class OrderingLiveSink extends MemoryLiveSink {
+  observations = [];
+
+  constructor(durable) {
+    super();
+    this.durable = durable;
+  }
+
+  publish(event) {
+    const durableType = durableTypeForLiveTerminal(event.type);
+    if (durableType) {
+      this.observations.push({
+        eventType: event.type,
+        durableAlreadyPresent: this.durable.records().some((record) => terminalMatchesLive(record, durableType, event)),
+      });
+    }
+    super.publish(event);
+  }
+}
+
+function durableTypeForLiveTerminal(eventType) {
+  switch (eventType) {
+    case LiveEventTypes.ToolCompleted:
+      return DurableRecordTypes.ToolResultCompleted;
+    case LiveEventTypes.ToolFailed:
+      return DurableRecordTypes.ToolResultFailed;
+    case LiveEventTypes.TurnCompleted:
+      return DurableRecordTypes.TurnCompleted;
+    case LiveEventTypes.TurnFailed:
+      return DurableRecordTypes.TurnFailed;
+    case LiveEventTypes.TurnAborted:
+      return DurableRecordTypes.TurnAborted;
+    default:
+      return undefined;
+  }
+}
+
+function terminalMatchesLive(record, durableType, event) {
+  return (
+    record.type === durableType &&
+    record.conversationId === event.conversationId &&
+    record.sessionId === event.sessionId &&
+    record.turnId === event.turnId &&
+    (event.toolCallId === undefined || record.toolCallId === event.toolCallId)
+  );
 }
