@@ -94,6 +94,20 @@ Gotchas:
 
 `read`, `write`, `edit`, `glob`, `grep`, `shell`. Nothing else — `ls`, read-many-files, background shell, ask-user, todos, plan mode, and web access are v1.x.
 
+### T3R — Tool Executor Refactor
+
+The first implementation put registry, path confinement, input parsing, six tool handlers, shell process management, AGENTS.md discovery, mention resolution, and result shaping into one module. That is the same maintainability smell T2 had: correct ingredients, wrong ownership. Gemini keeps one file/class per tool with shared path utilities; Codex separates router, registry, handlers, runtimes, sandboxing, and lifecycle. Match that shape before extending tools.
+
+- [x] Record the maintainability concern: the tool executor facade must not own every tool implementation detail.
+- [x] Keep `workspace-tools.ts` as a small public facade: tool metadata, factory, and name-to-handler dispatch only.
+- [x] Extract `WorkspacePathGuard` for realpath confinement, default-root resolution, `..` escapes, symlink escapes, and write-to-new-path ancestor handling.
+- [x] Extract input/result helpers so individual tools return stable failed outcomes instead of throwing for model-caused errors.
+- [x] Extract file tools (`read`, `write`, `edit`) from search and shell concerns.
+- [x] Extract search tools (`glob`, `grep`) and keep the Node implementation independent of `ripgrep`.
+- [x] Extract shell runtime behavior: process-group kill, timeout/abort classification, streaming callbacks, and truncation.
+- [x] Extract AGENTS.md discovery and `@file` mention resolution as context helpers, not tool handlers.
+- [x] Re-run T3 tests after the split; the refactor must not change public exports or task behavior.
+
 - [x] Workspace confinement: every path resolves to an absolute real path inside a configured root. Resolve symlinks **before** checking. Refusal is a `failed` outcome. Test both a `..` escape and a symlink escape.
 - [x] `read` with line-numbered output and offset/limit; binary or non-UTF8 files fail cleanly.
 - [x] `write` full-content, reporting bytes written.
