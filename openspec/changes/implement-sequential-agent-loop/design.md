@@ -187,6 +187,24 @@ Two mechanical notes:
 - **Strip the `$schema` key before sending.** `z.toJSONSchema()` emits it; providers do not want it.
 - Two wire shapes from one schema: OpenAI-compatible `tools[].function.{name,description,parameters}`, Anthropic `tools[].{name,description,input_schema}`. The adapter owns that translation — the tool never knows which provider it is talking to.
 
+### Amendment 2026-09-12: a flat port, with validation enforced by construction
+
+The implementation diverged from the two-phase shape above. `ToolExecutorPort` is flat:
+
+```ts
+definitions(): readonly ToolDefinition[]
+validate(request: ToolValidationRequest): ToolInputValidation
+execute(request: ToolExecutionRequest): Promise<ToolOutcome>
+```
+
+The divergence is accepted. The flat port reads more simply than a tool/invocation pair, and it avoided introducing classes for a package that is otherwise functional.
+
+What it gives up is the property that made gemini's `build()` worth copying: **validation enforced by construction.** With `build()`, the only way to obtain something executable is to have passed validation. With a separate `validate()`, `execute()` can be called with unvalidated input and nothing in the types objects. Today `tool-wave-runner.ts` calls `validate` before `execute` on both the provider path and the `allow-modified` path, so behaviour is correct — but that correctness rests on a caller remembering, and a second caller (transport, subagent path) or a later refactor can silently skip it. The failure mode is unvalidated input reaching a tool.
+
+Resolution, which keeps the flat shape: **`validate()` returns an opaque branded type that `execute()` requires.** Skipping validation then becomes a compile error rather than a code-review question. No classes, no two-phase objects, and the property is recovered.
+
+Recorded because the code and this decision disagreed, and a design doc that loses an argument to the implementation should say so rather than quietly go stale.
+
 ### Validation boundary
 
 The engine validates input against the declared schema **before** writing `tool.requested`, for both provider-supplied and policy-modified input. A violation is `tool.result.failed`, not a turn failure, per B10. The executor still validates what only it knows — path exists, pattern compiles — and returns a `failed` outcome.

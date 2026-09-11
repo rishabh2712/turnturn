@@ -1,0 +1,5 @@
+# Generated provider captures can contain request/response bodies and headers.
+# Keep the fixture docs tracked, but do not accidentally commit raw captures.
+/providers/**
+!/providers/
+!/providers/.gitkeep

@@ -19,7 +19,8 @@ pnpm --version   # 9.12.3
 - [ROADMAP.md](ROADMAP.md) — v1 scope, milestone order, and what is deferred.
 - [OpenSpec project context](openspec/project.md) — working rules, the design-review requirement, and the one-home-per-fact rule.
 - [Architecture skill](.agents/skills/turnturn-architecture/SKILL.md) — where things live and what discipline applies.
-- [Current change](openspec/changes/implement-sequential-agent-loop/) — Milestone 3, the sequential agent loop. Design is written and awaiting review; implementation has not started.
+- [Current change](openspec/changes/implement-sequential-agent-loop/) — Milestone 3, the sequential agent loop.
+- [Architecture walkthrough](notes/architecture-walkthrough.md) — a 30-minute teaching read: why the design is shaped this way, the invariants, and seven bugs this codebase already made. Start here if you are new to it. It teaches rather than decides; `design.md` remains authoritative.
 
 ## Rules
 

@@ -285,6 +285,8 @@ Design: `design.md` Decision 11.
 - [x] Test: the serialized body carries all six tools, each with a non-empty description and an object schema.
 - [x] Test: a malformed tool input fails the call with `POLICY_INVALID_INPUT` or a schema error, and the turn continues.
 - [ ] Live: confirm a real model actually calls a tool through the LiteLLM lane.
+- [ ] Make `validate()` return an **opaque branded type that `execute()` requires**, so skipping validation is a compile error rather than a caller remembering. See Decision 11, Amendment 2026-09-12. `tool-wave-runner.ts` does call `validate` first on both paths today, so this protects the property against a second caller or a later refactor rather than fixing current behaviour.
+- [ ] Fix the `read.limit` description: "Omit to read the file" should read "the whole file". Descriptions are prompt surface and deserve the same care as prompt text.
 
 ### T4B — Per-Adapter Checklist
 
@@ -324,6 +326,36 @@ These items are per adapter, not global. One shared checkbox cannot express "don
 - [ ] Live smoke tests for all configured lanes, excluded from the default run.
 - [ ] Update `research/s1-findings.md` from live observations; reconcile the port against reality and record any change it forced.
 - [ ] `OpenAIResponsesAdapter` for direct OpenAI `/v1/responses` is deferred to v1.x unless the adapter matrix changes again.
+
+### T4D — Open Adapter Defects
+
+Found in review of T4R and not fixed by it. T4R shipped as complete with these outstanding, which is why they are written down here rather than left in a conversation. Review findings that live only in chat evaporate.
+
+**Bug (h): a tool call with no provider id produces a completion that never started.** *(live; raised in T4R review, unfixed)*
+
+`tool-calls.ts` gates `tool-call-start` and `tool-call-arguments-delta` on `call.callId !== undefined`, but `parseToolArguments` falls back to `call.callId ?? call.syntheticCallId`. So if a provider never sends an `id`:
+
+- no `tool-call-start` and no `tool-call-arguments-delta` are emitted — the buffered argument deltas are silently dropped from the event stream
+- `tool-call-complete` **is** emitted, carrying `tool-0`
+- that synthetic id becomes `providerToolCallId`, goes back as `tool_call_id` in history, and the provider rejects the conversation
+
+That last point is the serious half of bug (c) relocated rather than removed. Newly reachable now that T4A puts tools on the wire, and the Ollama OpenAI-compat lane is exactly where ids are flaky.
+
+- [ ] Treat a tool call that completes with no provider-supplied id as `failed: { kind: "protocol" }`. A provider emitting tool calls without ids is non-conformant and its conversation cannot be round-tripped, so fail loudly rather than inventing an id. Consistent with the B3/B4 discipline applied everywhere else.
+- [ ] Delete `syntheticCallId` once nothing depends on it.
+- [ ] Test: a tool-call stream with no `id` at any point fails as `protocol` and emits no `tool-call-complete`.
+
+**Bug (i): `callIds()` computes a second, disagreeing synthetic id.**
+
+`callIds()` uses the array position while `syntheticCallId` uses the map key, so with keys `{1, 3}` one yields `tool-0, tool-1` and the other `tool-1, tool-3`. Only consumed by an error message, so the impact is a misleading diagnostic — but two disagreeing synthetic ids is the smell that points at bug (h).
+
+- [ ] Resolve as part of bug (h); both disappear when synthetic ids do.
+
+**Gap: no `frames.test.mjs`.**
+
+Decision 12 and T4R both called for one. `frames.ts` owns untrusted-JSON reads and the `[DONE]` sentinel typing, so malformed-JSON handling lives there and is currently only covered indirectly through `translate.test.mjs`.
+
+- [ ] Add `test/providers/openai-chat-completions/frames.test.mjs`: malformed JSON, `[DONE]`, missing `choices`, non-object payload, unexpected field types.
 
 ### T4F — Optional: fixture capture harness
 
