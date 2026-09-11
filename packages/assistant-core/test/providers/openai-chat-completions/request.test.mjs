@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  buildChatCompletionsHeaders,
+  buildChatCompletionsRequest,
+  buildChatCompletionsRequestBody,
+} from "../../../dist/providers/openai-chat-completions/request.js";
+
+test("chat completions request body maps model, streaming, history, and max tokens", () => {
+  assert.deepEqual(
+    buildChatCompletionsRequestBody({ model: "qwen", maxTokens: 50 }, providerRequest([user(1, "hello")])),
+    {
+      model: "qwen",
+      stream: true,
+      max_tokens: 50,
+      messages: [{ role: "user", content: "hello" }],
+    },
+  );
+});
+
+test("chat completions headers include auth for LiteLLM and omit it for keyless Ollama", () => {
+  assert.deepEqual(buildChatCompletionsHeaders({ apiKey: "sk-test", headers: { "X-Test": "yes" } }), {
+    Authorization: "Bearer sk-test",
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+    "X-Test": "yes",
+  });
+  assert.deepEqual(buildChatCompletionsHeaders({}), {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  });
+});
+
+test("chat completions request targets the OpenAI-compatible route", () => {
+  const request = buildChatCompletionsRequest(
+    { baseUrl: "http://127.0.0.1:11434", model: "qwen" },
+    providerRequest([]),
+  );
+
+  assert.equal(request.url.href, "http://127.0.0.1:11434/v1/chat/completions");
+  assert.equal(request.init.method, "POST");
+  assert.equal(JSON.parse(request.init.body).model, "qwen");
+});
+
+function providerRequest(items) {
+  return {
+    conversationId: "conv_018f1f4e-8d5f-7abc-8123-000000000001",
+    sessionId: "sess_018f1f4e-8d5f-7abc-8123-000000000002",
+    turnId: "turn_018f1f4e-8d5f-7abc-8123-000000000003",
+    stepId: "step_018f1f4e-8d5f-7abc-8123-000000000004",
+    history: { items, issues: [], lastSequence: 0 },
+    signal: new AbortController().signal,
+  };
+}
+
+function user(sequence, content) {
+  return { type: "user.input", recordId: `rec_${sequence}`, sequence, turnId: "turn_1", content };
+}

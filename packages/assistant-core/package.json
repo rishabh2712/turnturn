@@ -21,6 +21,14 @@
       "types": "./dist/provider-step-runner.d.ts",
       "import": "./dist/provider-step-runner.js"
     },
+    "./providers/sse": {
+      "types": "./dist/providers/sse.d.ts",
+      "import": "./dist/providers/sse.js"
+    },
+    "./providers/openai-chat-completions": {
+      "types": "./dist/providers/openai-chat-completions/index.d.ts",
+      "import": "./dist/providers/openai-chat-completions/index.js"
+    },
     "./records": {
       "types": "./dist/records.d.ts",
       "import": "./dist/records.js"
@@ -28,6 +36,10 @@
     "./rejections": {
       "types": "./dist/rejections.d.ts",
       "import": "./dist/rejections.js"
+    },
+    "./session-provider-history": {
+      "types": "./dist/session-provider-history.d.ts",
+      "import": "./dist/session-provider-history.js"
     },
     "./testing": {
       "types": "./dist/testing.d.ts",
@@ -56,7 +68,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "biome check .",
-    "test": "pnpm build && node --test test/*.test.mjs",
+    "test": "pnpm build && node --test test/*.test.mjs test/providers/*.test.mjs test/providers/openai-chat-completions/*.test.mjs",
     "typecheck": "tsc -p tsconfig.type-tests.json --noEmit"
   },
   "dependencies": {
