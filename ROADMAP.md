@@ -96,6 +96,7 @@ Goal: one narrow path all the way through — real provider, real tools, real ed
 OpenSpec change:
 
 - `implement-sequential-agent-loop`
+- `implement-web-client-harness` — companion M3 client/transport harness for the minimal renderer exit criterion.
 
 Exit criteria:
 
