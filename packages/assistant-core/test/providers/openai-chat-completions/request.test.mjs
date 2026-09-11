@@ -5,6 +5,7 @@ import {
   buildChatCompletionsRequest,
   buildChatCompletionsRequestBody,
 } from "../../../dist/providers/openai-chat-completions/request.js";
+import { workspaceToolDefinitions } from "../../../dist/workspace-tools.js";
 
 test("chat completions request body maps model, streaming, history, and max tokens", () => {
   assert.deepEqual(
@@ -42,6 +43,25 @@ test("chat completions request targets the OpenAI-compatible route", () => {
   assert.equal(JSON.parse(request.init.body).model, "qwen");
 });
 
+test("chat completions request serializes all workspace tools as OpenAI function tools", () => {
+  const body = buildChatCompletionsRequestBody(
+    { model: "qwen" },
+    { ...providerRequest([]), tools: workspaceToolDefinitions },
+  );
+
+  assert.equal(body.tool_choice, "auto");
+  assert.deepEqual(
+    body.tools.map((tool) => tool.function.name),
+    ["read", "write", "edit", "glob", "grep", "shell"],
+  );
+  for (const tool of body.tools) {
+    assert.equal(tool.type, "function");
+    assert.notEqual(tool.function.description.trim(), "");
+    assert.equal(tool.function.parameters.type, "object");
+    assert.equal(tool.function.parameters.$schema, undefined);
+  }
+});
+
 function providerRequest(items) {
   return {
     conversationId: "conv_018f1f4e-8d5f-7abc-8123-000000000001",
@@ -49,6 +69,7 @@ function providerRequest(items) {
     turnId: "turn_018f1f4e-8d5f-7abc-8123-000000000003",
     stepId: "step_018f1f4e-8d5f-7abc-8123-000000000004",
     history: { items, issues: [], lastSequence: 0 },
+    tools: [],
     signal: new AbortController().signal,
   };
 }

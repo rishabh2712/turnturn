@@ -196,10 +196,9 @@ const live = {
 };
 
 class InspectingProvider {
-  constructor(delegate, options) {
-    this.delegate = delegate;
+  constructor(name, options) {
     this.options = options;
-    this.name = `${delegate.name}-inspected`;
+    this.name = `${name}-inspected`;
   }
 
   async *run(request) {
@@ -210,11 +209,9 @@ class InspectingProvider {
     line("PROVIDER HISTORY");
     line(JSON.stringify(request.history, null, 2));
     line("");
-    line("PROVIDER EVENTS");
-    for await (const event of this.delegate.run(request)) {
-      line(JSON.stringify(event));
-      yield event;
-    }
+    line("inspect-provider: exiting without calling upstream provider");
+    yield* [];
+    return;
   }
 }
 
@@ -269,12 +266,12 @@ function createProvider() {
         maxTokens,
       };
       const provider = ollamaChatCompletions(options);
-      return inspectProvider ? new InspectingProvider(provider, { model, maxTokens }) : provider;
+      return inspectProvider ? new InspectingProvider(provider.name, { model, maxTokens }) : provider;
     }
     case "openai-chat-completions": {
       const options = { apiKey, baseUrl, model, maxTokens };
       const provider = new OpenAIChatCompletionsAdapter(options);
-      return inspectProvider ? new InspectingProvider(provider, options) : provider;
+      return inspectProvider ? new InspectingProvider(provider.name, options) : provider;
     }
     default:
       throw new Error(`unknown provider: ${providerName}`);
@@ -300,7 +297,7 @@ line(`provider  ${providerName}`);
 if (providerName === "ollama") line(`baseUrl   ${baseUrl ?? "http://127.0.0.1:11434"}`);
 else line(`baseUrl   ${baseUrl}`);
 line(`model     ${model}`);
-if (inspectProvider) line("inspect   provider request/events enabled");
+if (inspectProvider) line("inspect   print provider request and skip upstream call");
 
 await engine.submit(
   command(CommandTypes.ConversationCreate, { conversationId, sessionId }, { title: prompt.slice(0, 60) }),

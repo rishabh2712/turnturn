@@ -175,6 +175,52 @@ test("mixed sibling tool success and denial both reach the next provider step", 
   assertEveryRequestedToolTerminated(durable.records());
 });
 
+test("provider history is scoped to the current session", async () => {
+  const first = {
+    conversationId: formatConversationId(uuid(31)),
+    sessionId: formatSessionId(uuid(32)),
+    turnId: formatTurnId(uuid(33)),
+  };
+  const second = {
+    conversationId: formatConversationId(uuid(41)),
+    sessionId: formatSessionId(uuid(42)),
+    turnId: formatTurnId(uuid(43)),
+  };
+  const histories = [];
+  const provider = {
+    name: "history-scope-probe",
+    async *run(request) {
+      histories.push(request.history);
+      yield { type: "completed", reason: "complete" };
+    },
+  };
+  const { engine, durable } = await seededEngine({ provider });
+
+  await engine.submit(command(CommandTypes.ConversationCreate, { title: "First" }, first, 31));
+  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, first, 32));
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "first-session-only" }, first, 33));
+  await engine.submit(command(CommandTypes.ConversationCreate, { title: "Second" }, second, 41));
+  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, second, 42));
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "second-session-only" }, second, 43));
+
+  assert.equal(histories.length, 2);
+  assert.deepEqual(
+    histories[1].items.filter((item) => item.type === ProviderHistoryItemTypes.UserInput).map((item) => item.content),
+    ["second-session-only"],
+  );
+  const secondInputRecord = durable
+    .records()
+    .find(
+      (record) => record.type === DurableRecordTypes.UserInputAccepted && record.payload.text === "second-session-only",
+    );
+  assert.equal(
+    histories[1].items.find((item) => item.type === ProviderHistoryItemTypes.UserInput).sequence,
+    secondInputRecord.sequence,
+  );
+  assert.deepEqual(histories[1].issues, []);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+});
+
 test("policy deny and abort produce synthetic terminal tool records", async () => {
   const provider = new ScriptedProvider([
     [
@@ -462,6 +508,78 @@ test("recoverable tool failure continues to the next provider step", async () =>
   await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 11));
 
   assert.ok(durable.records().some((record) => record.type === DurableRecordTypes.ToolResultFailed));
+  assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnCompleted);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+  assertEveryRequestedToolTerminated(durable.records());
+});
+
+test("malformed provider tool input fails the call and continues to the next provider step", async () => {
+  const provider = new ScriptedProvider([
+    [
+      { type: "tool-call-complete", call: { callId: "native", name: "read", input: { offset: 1 } } },
+      { type: "completed", reason: "tool-use" },
+    ],
+    [
+      { type: "text-delta", text: "retryable" },
+      { type: "completed", reason: "complete" },
+    ],
+  ]);
+  let executed = false;
+  const tools = new MemoryToolExecutor(() => {
+    executed = true;
+    return completed("should not run");
+  });
+  tools.validate = () => ({
+    ok: false,
+    error: { code: "TOOL_SCHEMA_INVALID", message: "path is required", retryable: false, fatal: false },
+  });
+  const { engine, durable } = await seededEngine({ provider, tools });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 32));
+
+  assert.equal(executed, false);
+  const failedResult = durable.records().find((record) => record.type === DurableRecordTypes.ToolResultFailed);
+  assert.equal(failedResult.payload.error.code, "TOOL_SCHEMA_INVALID");
+  assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnCompleted);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+  assertEveryRequestedToolTerminated(durable.records());
+});
+
+test("malformed policy-modified tool input fails the call and continues to the next provider step", async () => {
+  const provider = new ScriptedProvider([
+    [
+      { type: "tool-call-complete", call: { callId: "native", name: "read", input: { path: "README.md" } } },
+      { type: "completed", reason: "tool-use" },
+    ],
+    [
+      { type: "text-delta", text: "retryable" },
+      { type: "completed", reason: "complete" },
+    ],
+  ]);
+  let executed = false;
+  const tools = new MemoryToolExecutor(() => {
+    executed = true;
+    return completed("should not run");
+  });
+  tools.validate = ({ input }) =>
+    input.path === "README.md"
+      ? { ok: true, input }
+      : {
+          ok: false,
+          error: { code: "TOOL_SCHEMA_INVALID", message: "path is required", retryable: false, fatal: false },
+        };
+  const policy = new StaticPolicy({ kind: "allow-modified", input: { offset: 1 } });
+  const { engine, durable } = await seededEngine({ provider, policy, tools });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 33));
+
+  assert.equal(executed, false);
+  const request = durable.records().find((record) => record.type === DurableRecordTypes.ToolRequested);
+  const failedResult = durable.records().find((record) => record.type === DurableRecordTypes.ToolResultFailed);
+  assert.deepEqual(request.payload.input, { offset: 1 });
+  assert.equal(failedResult.payload.error.code, "TOOL_SCHEMA_INVALID");
   assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnCompleted);
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);

@@ -34,8 +34,10 @@ import type {
   ProviderEvent,
   ProviderPort,
   ProviderRequest,
+  ToolDefinition,
   ToolExecutionRequest,
   ToolExecutorPort,
+  ToolInputValidation,
   ToolOutcome,
   ToolPolicyPort,
 } from "./ports.js";
@@ -165,7 +167,18 @@ export const askPolicy = (reason = "approval required"): ToolPolicyPort => new S
 export class MemoryToolExecutor implements ToolExecutorPort {
   readonly requests: ToolExecutionRequest[] = [];
 
-  constructor(private readonly handler: (request: ToolExecutionRequest) => Promise<ToolOutcome> | ToolOutcome) {}
+  constructor(
+    private readonly handler: (request: ToolExecutionRequest) => Promise<ToolOutcome> | ToolOutcome,
+    private readonly toolDefinitions: readonly ToolDefinition[] = [],
+  ) {}
+
+  definitions(): readonly ToolDefinition[] {
+    return this.toolDefinitions;
+  }
+
+  validate(request: { readonly input: JsonValue }): ToolInputValidation {
+    return { ok: true, input: request.input };
+  }
 
   async execute(request: ToolExecutionRequest): Promise<ToolOutcome> {
     this.requests.push(request);

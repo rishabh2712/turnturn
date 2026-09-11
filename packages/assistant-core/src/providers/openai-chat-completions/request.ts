@@ -38,11 +38,24 @@ export function buildChatCompletionsRequestBody(
   options: Pick<OpenAIChatCompletionsAdapterOptions, "maxTokens" | "model">,
   request: ProviderRequest,
 ): JsonValue {
+  const tools = request.tools ?? [];
   return {
     model: options.model,
     stream: true,
     messages: providerHistoryToChatMessages(request.history.items),
+    ...(tools.length === 0 ? {} : { tools: tools.map(openAiToolDefinition), tool_choice: "auto" }),
     ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }),
+  };
+}
+
+function openAiToolDefinition(tool: ProviderRequest["tools"][number]): JsonValue {
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
   };
 }
 

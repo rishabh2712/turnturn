@@ -273,17 +273,17 @@ Do the moves first, with no behaviour change, so every later step is a small dif
 
 Design: `design.md` Decision 11.
 
-- [ ] Restore a first-class tool concept: `name`, `description`, parameter schema, `mutating`. Tools declare; the executor builds and runs.
-- [ ] Define zod schemas for all six tools, with a `.describe()` on every field. Field descriptions are prompt surface, not just validation — they are how the model learns to call the tool.
-- [ ] Derive the wire JSON Schema with `z.toJSONSchema()`, stripping the `$schema` key before sending.
-- [ ] Derive TypeScript param types with `z.infer`, so a handler cannot disagree with its own schema.
-- [ ] Add `tools: readonly ToolDefinition[]` to `ProviderRequest` so definitions reach the adapter.
-- [ ] Serialize into the chat-completions body as `tools[].function.{name,description,parameters}`.
-- [ ] Validate input against the schema before writing `tool.requested`, for both provider-supplied and policy-modified input, failing the call rather than the turn (B10).
-- [ ] **Keep schema validation out of the adapter** (Decision 12). The adapter validates the wire — parseable arguments, finish-reason agreement — which fails as `protocol` and kills the step. Schema validation belongs to the tool layer and fails as `tool.result.failed`, which the model can retry. Putting it in the adapter turns a model typo into a dead turn.
-- [ ] Add `--inspect-provider` to `scripts/e2e-turn.mjs`: print the serialized request body and exit without calling the provider.
-- [ ] Test: the serialized body carries all six tools, each with a non-empty description and an object schema.
-- [ ] Test: a malformed tool input fails the call with `POLICY_INVALID_INPUT` or a schema error, and the turn continues.
+- [x] Restore a first-class tool concept: `name`, `description`, parameter schema, `mutating`. Tools declare; the executor builds and runs.
+- [x] Define zod schemas for all six tools, with a `.describe()` on every field. Field descriptions are prompt surface, not just validation — they are how the model learns to call the tool.
+- [x] Derive the wire JSON Schema with `z.toJSONSchema()`, stripping the `$schema` key before sending.
+- [x] Derive TypeScript param types with `z.infer`, so a handler cannot disagree with its own schema.
+- [x] Add `tools: readonly ToolDefinition[]` to `ProviderRequest` so definitions reach the adapter.
+- [x] Serialize into the chat-completions body as `tools[].function.{name,description,parameters}`.
+- [x] Validate input against the schema before writing `tool.requested`, for both provider-supplied and policy-modified input, failing the call rather than the turn (B10).
+- [x] **Keep schema validation out of the adapter** (Decision 12). The adapter validates the wire — parseable arguments, finish-reason agreement — which fails as `protocol` and kills the step. Schema validation belongs to the tool layer and fails as `tool.result.failed`, which the model can retry. Putting it in the adapter turns a model typo into a dead turn.
+- [x] Add `--inspect-provider` to `scripts/e2e-turn.mjs`: print the serialized request body and exit without calling the provider.
+- [x] Test: the serialized body carries all six tools, each with a non-empty description and an object schema.
+- [x] Test: a malformed tool input fails the call with `POLICY_INVALID_INPUT` or a schema error, and the turn continues.
 - [ ] Live: confirm a real model actually calls a tool through the LiteLLM lane.
 
 ### T4B — Per-Adapter Checklist
@@ -299,7 +299,7 @@ These items are per adapter, not global. One shared checkbox cannot express "don
 - [x] Failure classification with `retryable` set deliberately; 429 and 400 asserted.
 - [x] Verified live against LiteLLM `/v1/chat/completions`.
 - [x] Smoked against local Ollama `/v1/chat/completions`. Transport proven; content quality not.
-- [ ] Serialize tool definitions into the request body (T4A).
+- [x] Serialize tool definitions into the request body (T4A).
 - [ ] Emit usage where the live stream or fixture contains it.
 - [ ] Abort leaves no dangling reader — a test that would otherwise hang.
 - [ ] History translation covers tool requests and tool results, not just text.

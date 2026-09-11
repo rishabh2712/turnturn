@@ -1,6 +1,6 @@
 import type { CommandEnvelope, CommandTypes, SerializedError, TurnId } from "@turnturn/protocol";
 import type { ApprovalRegistry } from "./approval-registry.js";
-import type { DurableSink, EngineIds, ProviderPort, ToolExecutorPort, ToolPolicyPort } from "./ports.js";
+import type { EngineIds, ProviderPort, ToolExecutorPort, ToolPolicyPort } from "./ports.js";
 import { ProviderStepRunner } from "./provider-step-runner.js";
 import type { RecordEmitter } from "./records.js";
 import { ToolWaveRunner } from "./tool-wave-runner.js";
@@ -8,7 +8,6 @@ import { TurnRuntime } from "./turn-runtime.js";
 
 export interface TurnRunnerOptions {
   readonly approvals: ApprovalRegistry;
-  readonly durable: DurableSink;
   readonly ids: EngineIds;
   readonly policy: ToolPolicyPort;
   readonly provider: ProviderPort;
@@ -24,9 +23,9 @@ export class TurnRunner {
   constructor(private readonly options: TurnRunnerOptions) {
     this.providerSteps = new ProviderStepRunner({
       provider: options.provider,
-      durable: options.durable,
       ids: options.ids,
       records: options.records,
+      tools: options.tools,
     });
     this.toolWaves = new ToolWaveRunner({
       ids: options.ids,

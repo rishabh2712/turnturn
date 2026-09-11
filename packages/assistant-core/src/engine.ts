@@ -42,7 +42,6 @@ class DefaultAssistantEngine implements AssistantEngine {
     this.records = new RecordEmitter(options);
     this.turns = new TurnRunner({
       approvals: this.approvals,
-      durable: options.durable,
       ids: options.ids,
       policy: options.policy,
       provider: options.provider,

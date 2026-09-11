@@ -39,6 +39,7 @@ export interface RecordScope {
 
 export class RecordEmitter {
   private appendChain: Promise<void> = Promise.resolve();
+  private readonly recordsBySession = new Map<SessionId, DurableRecord[]>();
 
   constructor(private readonly options: RecordEmitterOptions) {}
 
@@ -243,6 +244,10 @@ export class RecordEmitter {
     await this.publishLive(Live.ToolProgress, scope, { message });
   }
 
+  sessionRecords(sessionId: SessionId): readonly DurableRecord[] {
+    return this.recordsBySession.get(sessionId) ?? [];
+  }
+
   private async append<T extends DurableRecordTypes>(
     command: CommandEnvelope,
     type: T,
@@ -267,6 +272,9 @@ export class RecordEmitter {
     let record!: DurableRecord<T>;
     this.appendChain = this.appendChain.then(async () => {
       record = (await this.options.durable.append(draft)) as DurableRecord<T>;
+      const sessionRecords = this.recordsBySession.get(record.sessionId) ?? [];
+      sessionRecords.push(record);
+      this.recordsBySession.set(record.sessionId, sessionRecords);
     });
     await this.appendChain;
     return record;

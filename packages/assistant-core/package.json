@@ -72,7 +72,8 @@
     "typecheck": "tsc -p tsconfig.type-tests.json --noEmit"
   },
   "dependencies": {
-    "@turnturn/protocol": "workspace:*"
+    "@turnturn/protocol": "workspace:*",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "24.9.1",

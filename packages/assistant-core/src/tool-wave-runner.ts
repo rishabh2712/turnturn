@@ -43,17 +43,47 @@ export class ToolWaveRunner {
       }
 
       const toolCallId = this.options.ids.toolCallId();
+      const providerInput = this.options.tools.validate({ name: call.name, input: call.input });
+      if (!providerInput.ok) {
+        await this.recordInvalidToolInput(
+          command,
+          stepId,
+          toolCallId,
+          call,
+          providerOrder,
+          call.input,
+          providerInput.error,
+        );
+        continue;
+      }
+
       const decision = await this.options.policy.decide({
         conversationId: command.conversationId,
         sessionId: command.sessionId,
         turnId: command.turnId,
         toolCallId,
         name: call.name,
-        input: call.input,
+        input: providerInput.input,
       });
 
-      const input = decision.kind === "allow-modified" ? decision.input : call.input;
-      const requiresApproval = decision.kind === "ask";
+      const policyInput =
+        decision.kind === "allow-modified"
+          ? this.options.tools.validate({ name: call.name, input: decision.input })
+          : providerInput;
+      if (!policyInput.ok) {
+        await this.recordInvalidToolInput(
+          command,
+          stepId,
+          toolCallId,
+          call,
+          providerOrder,
+          decision.kind === "allow-modified" ? decision.input : call.input,
+          policyInput.error,
+        );
+        continue;
+      }
+
+      const input = policyInput.input;
       await this.options.records.toolRequested(
         command,
         { ...command, stepId, toolCallId },
@@ -61,7 +91,7 @@ export class ToolWaveRunner {
           name: call.name,
           input,
           providerOrder,
-          requiresApproval,
+          requiresApproval: decision.kind === "ask",
           providerToolCallId: call.callId,
         },
       );
@@ -81,6 +111,29 @@ export class ToolWaveRunner {
     for (const [providerOrder, call] of toolCalls.entries()) {
       await this.recordSkippedToolAbort(command, stepId, call, providerOrder, reason);
     }
+  }
+
+  private async recordInvalidToolInput(
+    command: CommandEnvelope<CommandTypes.TurnSubmit>,
+    stepId: StepId,
+    toolCallId: ToolCallId,
+    call: ProviderToolCall,
+    providerOrder: number,
+    input: JsonValue,
+    error: SerializedError,
+  ): Promise<void> {
+    await this.options.records.toolRequested(
+      command,
+      { ...command, stepId, toolCallId },
+      {
+        name: call.name,
+        input,
+        providerOrder,
+        requiresApproval: false,
+        providerToolCallId: call.callId,
+      },
+    );
+    await this.options.records.toolFailed(command, { ...command, toolCallId }, error);
   }
 
   private async resolvePolicyDecision(

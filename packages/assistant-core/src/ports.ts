@@ -54,6 +54,7 @@ export interface ProviderRequest {
   readonly turnId: TurnId;
   readonly stepId: StepId;
   readonly history: ProviderHistory;
+  readonly tools: readonly ToolDefinition[];
   readonly signal: AbortSignal;
 }
 
@@ -83,7 +84,26 @@ export interface ToolExecutionRequest {
   readonly callbacks: ToolExecutionCallbacks;
 }
 
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: JsonValue;
+  readonly mutating: boolean;
+}
+
+export type ToolInputValidation =
+  | { readonly ok: true; readonly input: JsonValue }
+  | { readonly ok: false; readonly error: SerializedError };
+
+export interface ToolValidationRequest {
+  readonly name: string;
+  readonly input: JsonValue;
+}
+
 export interface ToolExecutorPort {
+  definitions(): readonly ToolDefinition[];
+  validate(request: ToolValidationRequest): ToolInputValidation;
+
   /**
    * Tool-level failures, such as a missing file or a non-runnable command, are returned as
    * `{ kind: "failed" }`. Throwing means the executor implementation itself is broken and the

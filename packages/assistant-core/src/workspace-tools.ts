@@ -1,11 +1,19 @@
 import os from "node:os";
 import path from "node:path";
-import type { ToolExecutionRequest, ToolExecutorPort, ToolOutcome } from "./ports.js";
+import type { JsonValue } from "@turnturn/protocol";
+import type {
+  ToolDefinition,
+  ToolExecutionRequest,
+  ToolExecutorPort,
+  ToolInputValidation,
+  ToolOutcome,
+} from "./ports.js";
 import { editTool, readTool, writeTool } from "./workspace/file-tools.js";
 import { discoverAgentsMd, resolveFileMentions } from "./workspace/instructions.js";
 import { WorkspacePathGuard } from "./workspace/path-guard.js";
 import { globTool, grepTool } from "./workspace/search-tools.js";
 import { shellTool } from "./workspace/shell-tool.js";
+import { validateWorkspaceToolInput, workspaceToolDefinitions } from "./workspace/tool-definitions.js";
 import { failed, ToolInputError } from "./workspace/tool-results.js";
 
 export interface WorkspaceToolExecutorOptions {
@@ -15,18 +23,7 @@ export interface WorkspaceToolExecutorOptions {
   readonly shellTimeoutMs?: number;
 }
 
-interface ToolDefinition {
-  readonly mutating: boolean;
-}
-
-export const workspaceToolDefinitions = {
-  read: { mutating: false },
-  write: { mutating: true },
-  edit: { mutating: true },
-  glob: { mutating: false },
-  grep: { mutating: false },
-  shell: { mutating: true },
-} as const satisfies Record<string, ToolDefinition>;
+export { workspaceToolDefinitions };
 
 export function createWorkspaceToolExecutor(options: WorkspaceToolExecutorOptions): ToolExecutorPort {
   return new WorkspaceToolExecutor(options);
@@ -41,6 +38,14 @@ class WorkspaceToolExecutor implements ToolExecutorPort {
     this.paths = new WorkspacePathGuard(options);
     this.maxOutputBytes = options.maxOutputBytes ?? 64 * 1024;
     this.shellTimeoutMs = options.shellTimeoutMs ?? 30_000;
+  }
+
+  definitions(): readonly ToolDefinition[] {
+    return workspaceToolDefinitions;
+  }
+
+  validate(request: { readonly name: string; readonly input: JsonValue }): ToolInputValidation {
+    return validateWorkspaceToolInput(request.name, request.input);
   }
 
   async execute(request: ToolExecutionRequest): Promise<ToolOutcome> {

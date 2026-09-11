@@ -1,20 +1,20 @@
 import type { CommandEnvelope, CommandTypes, StepId } from "@turnturn/protocol";
-import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
 import type {
   CompletionReason,
-  DurableSink,
   EngineIds,
   ProviderFailure,
   ProviderPort,
   ProviderToolCall,
+  ToolExecutorPort,
 } from "./ports.js";
 import type { RecordEmitter } from "./records.js";
+import { reduceSessionProviderHistory } from "./session-provider-history.js";
 
 export interface ProviderStepRunnerOptions {
   readonly provider: ProviderPort;
-  readonly durable: DurableSink;
   readonly ids: EngineIds;
   readonly records: RecordEmitter;
+  readonly tools: ToolExecutorPort;
 }
 
 export interface ProviderStepResult {
@@ -44,7 +44,8 @@ export class ProviderStepRunner {
       sessionId: command.sessionId,
       turnId: command.turnId,
       stepId,
-      history: reduceProviderHistory(this.options.durable.records()),
+      history: reduceSessionProviderHistory(this.options.records.sessionRecords(command.sessionId)),
+      tools: this.options.tools.definitions(),
       signal,
     };
 

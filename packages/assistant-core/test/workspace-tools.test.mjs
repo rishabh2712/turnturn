@@ -117,11 +117,42 @@ test("shell aborts through AbortSignal and flags deterministic truncation", asyn
 
 test("tool metadata marks only write edit and shell as mutating", () => {
   assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(workspaceToolDefinitions).map(([name, definition]) => [name, definition.mutating]),
-    ),
-    { read: false, write: true, edit: true, glob: false, grep: false, shell: true },
+    Object.fromEntries(workspaceToolDefinitions.map((definition) => [definition.name, definition.mutating])),
+    {
+      read: false,
+      write: true,
+      edit: true,
+      glob: false,
+      grep: false,
+      shell: true,
+    },
   );
+});
+
+test("tool definitions carry prompt descriptions and object schemas", () => {
+  assert.deepEqual(
+    workspaceToolDefinitions.map((definition) => definition.name),
+    ["read", "write", "edit", "glob", "grep", "shell"],
+  );
+
+  for (const definition of workspaceToolDefinitions) {
+    assert.equal(typeof definition.description, "string");
+    assert.notEqual(definition.description.trim(), "");
+    assert.equal(definition.parameters.type, "object");
+    assert.equal(definition.parameters.$schema, undefined);
+    assert.ok(Object.keys(definition.parameters.properties).length > 0);
+  }
+});
+
+test("workspace tool executor validates raw inputs against declared schemas", async () => {
+  const { tools } = await workspace();
+
+  const invalid = tools.validate({ name: "read", input: { offset: 1 } });
+  const valid = tools.validate({ name: "read", input: { path: "notes.txt", offset: 1 } });
+
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.error.code, "TOOL_SCHEMA_INVALID");
+  assert.equal(valid.ok, true);
 });
 
 test("AGENTS.md discovery is broad-to-specific and mentions preserve unresolved paths", async () => {
