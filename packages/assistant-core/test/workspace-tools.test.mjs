@@ -80,14 +80,20 @@ test("shell streams output, reports non-zero exits and timeouts distinctly", asy
   const streamed = [];
 
   const ok = await execute(tools, "shell", { command: "printf hi" }, { stdout: (text) => streamed.push(text) });
-  const nonZero = await execute(tools, "shell", { command: "exit 7" });
+  const nonZero = await execute(tools, "shell", { command: "printf out; printf err >&2; exit 7" });
   const timeout = await execute(tools, "shell", { command: 'node -e "setTimeout(() => {}, 1000)"', timeoutMs: 10 });
 
   assert.equal(ok.kind, "completed");
   assert.equal(ok.output.stdout, "hi");
   assert.deepEqual(streamed, ["hi"]);
-  assert.equal(nonZero.kind, "failed");
-  assert.equal(nonZero.error.code, "SHELL_NON_ZERO_EXIT");
+  assert.equal(nonZero.kind, "completed");
+  assert.deepEqual(nonZero.output, {
+    stdout: "out",
+    stderr: "err",
+    exitCode: 7,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+  });
   assert.equal(timeout.kind, "failed");
   assert.equal(timeout.error.code, "SHELL_TIMEOUT");
 });

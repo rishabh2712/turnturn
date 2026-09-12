@@ -23,10 +23,17 @@ test("chat history groups multiple tool calls from one step into one assistant m
         { id: "native_b", type: "function", function: { name: "read", arguments: '{"path":"b.txt"}' } },
       ],
     },
-    { role: "tool", tool_call_id: "tool_call_a", content: '{"content":"A"}' },
-    { role: "tool", tool_call_id: "tool_call_b", content: '{"content":"B"}' },
+    { role: "tool", tool_call_id: "native_a", content: '{"content":"A"}' },
+    { role: "tool", tool_call_id: "native_b", content: '{"content":"B"}' },
     { role: "user", content: "continue" },
   ]);
+
+  const assistantToolCalls = messages[1].tool_calls;
+  const toolResults = messages.filter((message) => message.role === "tool");
+  assert.deepEqual(
+    toolResults.map((message) => message.tool_call_id),
+    assistantToolCalls.map((call) => call.id),
+  );
 });
 
 test("chat history preserves a null tool output as a real output", () => {
@@ -43,7 +50,7 @@ test("chat history preserves a null tool output as a real output", () => {
         { id: "native_null", type: "function", function: { name: "read", arguments: '{"path":"empty.json"}' } },
       ],
     },
-    { role: "tool", tool_call_id: "tool_call_null", content: "null" },
+    { role: "tool", tool_call_id: "native_null", content: "null" },
   ]);
 });
 

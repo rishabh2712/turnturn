@@ -50,5 +50,24 @@ test("tool call assembler upgrades a synthetic provisional id when the real id a
     ],
   );
 
-  assert.deepEqual(assembler.completedCalls(), [{ callId: "call_real", name: "read", input: { path: "README.md" } }]);
+  assert.deepEqual(assembler.completedCalls(), {
+    ok: true,
+    calls: [{ callId: "call_real", name: "read", input: { path: "README.md" } }],
+  });
+});
+
+test("tool call assembler rejects completion when the provider never supplies an id", () => {
+  const assembler = new ChatToolCallAssembler();
+
+  assembler.merge({
+    index: 0,
+    callId: undefined,
+    name: "read",
+    argumentsDelta: '{"path":"README.md"}',
+  });
+
+  assert.deepEqual(assembler.completedCalls(), {
+    ok: false,
+    message: "Tool call completed without a provider id",
+  });
 });

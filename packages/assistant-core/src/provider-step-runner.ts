@@ -1,4 +1,5 @@
 import type { CommandEnvelope, CommandTypes, StepId } from "@turnturn/protocol";
+import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
 import type {
   CompletionReason,
   EngineIds,
@@ -8,7 +9,6 @@ import type {
   ToolExecutorPort,
 } from "./ports.js";
 import type { RecordEmitter } from "./records.js";
-import { reduceSessionProviderHistory } from "./session-provider-history.js";
 
 export interface ProviderStepRunnerOptions {
   readonly provider: ProviderPort;
@@ -44,7 +44,7 @@ export class ProviderStepRunner {
       sessionId: command.sessionId,
       turnId: command.turnId,
       stepId,
-      history: reduceSessionProviderHistory(this.options.records.sessionRecords(command.sessionId)),
+      history: reduceProviderHistory(this.options.records.sessionRecords(command.sessionId)),
       tools: this.options.tools.definitions(),
       signal,
     };
@@ -54,10 +54,10 @@ export class ProviderStepRunner {
       switch (event.type) {
         case "text-delta":
           assistantText += event.text;
-          await this.options.records.contentDelta(command, event.text);
+          await this.options.records.contentDelta({ ...command, stepId }, event.text);
           break;
         case "reasoning-delta":
-          await this.options.records.reasoningDelta(command, event.text);
+          await this.options.records.reasoningDelta({ ...command, stepId }, event.text);
           break;
         case "tool-call-start":
         case "tool-call-arguments-delta":
@@ -87,7 +87,7 @@ export class ProviderStepRunner {
 
     const reason = completedReason ?? (toolCalls.length > 0 ? "tool-use" : "complete");
     if (assistantText.length > 0) {
-      await this.options.records.assistantMessageCompleted(command, command, assistantText);
+      await this.options.records.assistantMessageCompleted(command, { ...command, stepId }, assistantText);
     }
     await this.options.records.providerStepCompleted(command, { ...command, stepId }, reason);
 

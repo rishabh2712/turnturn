@@ -47,7 +47,7 @@ function command(type, payload, scope = {}, n = 1, idempotencyKey) {
   };
 }
 
-async function seededEngine({ provider, policy = new StaticPolicy(), tools } = {}) {
+async function seededEngine({ provider, policy = new StaticPolicy(), tools, scope = {} } = {}) {
   const durable = new MemoryDurableSink();
   const live = new MemoryLiveSink();
   const engine = createAssistantEngine({
@@ -60,8 +60,8 @@ async function seededEngine({ provider, policy = new StaticPolicy(), tools } = {
     clock: new FixedClock(),
   });
 
-  await engine.submit(command(CommandTypes.ConversationCreate, { title: "Demo" }, {}, 1));
-  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, {}, 2));
+  await engine.submit(command(CommandTypes.ConversationCreate, { title: "Demo" }, scope, 1));
+  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, scope, 2));
   return { engine, durable, live };
 }
 
@@ -96,6 +96,41 @@ test("turn happy path persists the exact durable record type sequence", async ()
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
   assertEveryRequestedToolTerminated(durable.records());
+});
+
+test("assistant text and live deltas keep their provider step identity", async () => {
+  const provider = new ScriptedProvider([
+    [
+      { type: "reasoning-delta", text: "plan" },
+      { type: "text-delta", text: "reading" },
+      { type: "tool-call-complete", call: { callId: "native-read", name: "read", input: { path: "a.txt" } } },
+      { type: "completed", reason: "tool-use" },
+    ],
+    [
+      { type: "reasoning-delta", text: "summarize" },
+      { type: "text-delta", text: "done" },
+      { type: "completed", reason: "complete" },
+    ],
+  ]);
+  const { engine, durable, live } = await seededEngine({ provider });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 50));
+
+  const steps = durable.records().filter((record) => record.type === DurableRecordTypes.ProviderStepStarted);
+  const messages = durable.records().filter((record) => record.type === DurableRecordTypes.AssistantMessageCompleted);
+  const deltas = live.events.filter((event) =>
+    [LiveEventTypes.ContentDelta, LiveEventTypes.ReasoningDelta].includes(event.type),
+  );
+  assert.equal(steps.length, 2);
+  assert.deepEqual(
+    messages.map((record) => record.stepId),
+    steps.map((record) => record.stepId),
+  );
+  assert.deepEqual(
+    deltas.map((event) => event.stepId),
+    [steps[0].stepId, steps[0].stepId, steps[1].stepId, steps[1].stepId],
+  );
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
 });
 
 test("same-step tool calls execute strictly in provider order", async () => {
@@ -194,21 +229,17 @@ test("provider history is scoped to the current session", async () => {
       yield { type: "completed", reason: "complete" };
     },
   };
-  const { engine, durable } = await seededEngine({ provider });
-
-  await engine.submit(command(CommandTypes.ConversationCreate, { title: "First" }, first, 31));
-  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, first, 32));
-  await engine.submit(command(CommandTypes.TurnSubmit, { input: "first-session-only" }, first, 33));
-  await engine.submit(command(CommandTypes.ConversationCreate, { title: "Second" }, second, 41));
-  await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, second, 42));
-  await engine.submit(command(CommandTypes.TurnSubmit, { input: "second-session-only" }, second, 43));
+  const firstSession = await seededEngine({ provider, scope: first });
+  await firstSession.engine.submit(command(CommandTypes.TurnSubmit, { input: "first-session-only" }, first, 33));
+  const secondSession = await seededEngine({ provider, scope: second });
+  await secondSession.engine.submit(command(CommandTypes.TurnSubmit, { input: "second-session-only" }, second, 43));
 
   assert.equal(histories.length, 2);
   assert.deepEqual(
     histories[1].items.filter((item) => item.type === ProviderHistoryItemTypes.UserInput).map((item) => item.content),
     ["second-session-only"],
   );
-  const secondInputRecord = durable
+  const secondInputRecord = secondSession.durable
     .records()
     .find(
       (record) => record.type === DurableRecordTypes.UserInputAccepted && record.payload.text === "second-session-only",
@@ -218,7 +249,8 @@ test("provider history is scoped to the current session", async () => {
     secondInputRecord.sequence,
   );
   assert.deepEqual(histories[1].issues, []);
-  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceEngineState(firstSession.durable.records()).issues, []);
+  assert.deepEqual(reduceEngineState(secondSession.durable.records()).issues, []);
 });
 
 test("policy deny and abort produce synthetic terminal tool records", async () => {
@@ -654,7 +686,7 @@ test("terminal live events are published only after their durable record exists"
 });
 
 test("idempotency returns duplicate with original records", async () => {
-  const { engine } = await seededEngine();
+  const { engine, durable } = await seededEngine();
   const submit = command(CommandTypes.TurnSubmit, { input: "once" }, { turnId: ids.turnId }, 7, "turn-submit-once");
 
   const first = await engine.submit(submit);
@@ -663,6 +695,63 @@ test("idempotency returns duplicate with original records", async () => {
   assert.equal(first.kind, "accepted");
   assert.equal(second.kind, "duplicate");
   assert.deepEqual(second.records, first.records);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+});
+
+test("idempotency keys are scoped to a conversation and command type", async () => {
+  const { engine, durable } = await seededEngine();
+  const firstConversation = formatConversationId(uuid(61));
+  const secondConversation = formatConversationId(uuid(62));
+  const first = await engine.submit(
+    command(
+      CommandTypes.ConversationCreate,
+      { title: "First" },
+      { conversationId: firstConversation },
+      61,
+      "shared-key",
+    ),
+  );
+  const second = await engine.submit(
+    command(
+      CommandTypes.ConversationCreate,
+      { title: "Second" },
+      { conversationId: secondConversation },
+      62,
+      "shared-key",
+    ),
+  );
+  const conflict = await engine.submit(
+    command(
+      CommandTypes.TurnCancel,
+      { reason: "different type" },
+      { conversationId: firstConversation, turnId: ids.turnId },
+      63,
+      "shared-key",
+    ),
+  );
+
+  assert.equal(first.kind, "accepted");
+  assert.equal(second.kind, "accepted");
+  assert.deepEqual(conflict, {
+    kind: "rejected",
+    code: "IDEMPOTENCY_CONFLICT",
+    message: "Idempotency key was already used for a different command type",
+  });
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+});
+
+test("a rejected command does not reserve its idempotency key", async () => {
+  const { engine, durable } = await seededEngine();
+  const rejected = await engine.submit(
+    command(CommandTypes.TurnCancel, { reason: "too early" }, { turnId: ids.turnId }, 64, "reusable-key"),
+  );
+  const accepted = await engine.submit(
+    command(CommandTypes.TurnSubmit, { input: "now start" }, { turnId: ids.turnId }, 65, "reusable-key"),
+  );
+
+  assert.equal(rejected.kind, "rejected");
+  assert.equal(accepted.kind, "accepted");
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
 });
 
 function assertEveryRequestedToolTerminated(records) {

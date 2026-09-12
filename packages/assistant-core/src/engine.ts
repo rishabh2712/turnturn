@@ -33,7 +33,10 @@ export function createAssistantEngine(options: AssistantEngineOptions): Assistan
 }
 
 class DefaultAssistantEngine implements AssistantEngine {
-  private readonly completedIdempotency = new Map<string, AcceptedOutcome>();
+  private readonly completedIdempotency = new Map<
+    string,
+    Map<string, { type: CommandTypes; outcome: AcceptedOutcome }>
+  >();
   private readonly approvals = new ApprovalRegistry();
   private readonly records: RecordEmitter;
   private readonly turns: TurnRunner;
@@ -55,16 +58,22 @@ class DefaultAssistantEngine implements AssistantEngine {
   }
 
   async submit(command: CommandEnvelope): Promise<CommandOutcome> {
+    const conversationKey = command.conversationId ?? "";
     if (command.idempotencyKey) {
-      const completed = this.completedIdempotency.get(command.idempotencyKey);
-      if (completed !== undefined) return { kind: "duplicate", records: completed.records };
+      const completed = this.completedIdempotency.get(conversationKey)?.get(command.idempotencyKey);
+      if (completed !== undefined) {
+        if (completed.type !== command.type) return commandRejected.idempotencyConflict();
+        return { kind: "duplicate", records: completed.outcome.records };
+      }
     }
 
     const before = this.options.durable.records().length;
     const outcome = await this.apply(command, before);
 
     if (command.idempotencyKey && outcome.kind === "accepted") {
-      this.completedIdempotency.set(command.idempotencyKey, outcome);
+      const conversationKeys = this.completedIdempotency.get(conversationKey) ?? new Map();
+      conversationKeys.set(command.idempotencyKey, { type: command.type, outcome });
+      this.completedIdempotency.set(conversationKey, conversationKeys);
     }
     return outcome;
   }

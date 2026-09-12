@@ -1,6 +1,16 @@
-# Web App
+# Turnturn Web Harness
 
-Product surface for the coding assistant.
+Reusable React client for driving the local assistant server.
 
-The exact framework is intentionally not installed yet because this machine still needs Node.js and the package manager. A good default is Next.js with TypeScript once the toolchain is ready.
+Run the server:
 
+```bash
+TURNTURN_PROVIDER=ollama TURNTURN_MODEL=llama3.2 \
+pnpm --filter @turnturn/assistant-server exec turnturn-assistant-server
+```
+
+Copy the token printed by the server into `VITE_TURNTURN_TOKEN`, then run the web client:
+
+```bash
+VITE_TURNTURN_TOKEN=<token-from-server-banner> pnpm --filter @turnturn/web dev
+```

@@ -94,11 +94,11 @@ async function runShell(
         finish(failed("SHELL_TIMEOUT", `Shell command timed out after ${timeoutMs}ms`));
         return;
       }
-      if (code === 0) {
+      if (code !== null) {
         finish(completed({ stdout, stderr, exitCode: code, stdoutTruncated, stderrTruncated }));
         return;
       }
-      finish(failed("SHELL_NON_ZERO_EXIT", `Shell command exited with ${code ?? `signal ${signal}`}`));
+      finish(failed("SHELL_SIGNAL_TERMINATED", `Shell command exited with signal ${signal ?? "unknown"}`));
     });
   });
 }

@@ -4,6 +4,7 @@ import type { ProviderRequest } from "../../ports.js";
 
 export function providerHistoryToChatMessages(items: ProviderRequest["history"]["items"]): JsonValue[] {
   const messages: JsonValue[] = [];
+  const providerCallIds = new Map<string, string>();
   let pendingAssistant: PendingAssistant | undefined;
 
   const flushAssistant = () => {
@@ -30,19 +31,22 @@ export function providerHistoryToChatMessages(items: ProviderRequest["history"][
         flushAssistant();
         pendingAssistant = { content: item.content, toolCalls: [] };
         break;
-      case ProviderHistoryItemTypes.ToolRequest:
+      case ProviderHistoryItemTypes.ToolRequest: {
         pendingAssistant ??= { toolCalls: [] };
+        const providerCallId = item.providerToolCallId ?? item.toolCallId;
+        providerCallIds.set(item.toolCallId, providerCallId);
         pendingAssistant.toolCalls.push({
-          id: item.providerToolCallId ?? item.toolCallId,
+          id: providerCallId,
           type: "function",
           function: { name: item.name, arguments: JSON.stringify(item.input) },
         });
         break;
+      }
       case ProviderHistoryItemTypes.ToolResult:
         flushAssistant();
         messages.push({
           role: "tool",
-          tool_call_id: item.toolCallId,
+          tool_call_id: providerCallIds.get(item.toolCallId) ?? item.toolCallId,
           content: stringifyToolResultContent(item),
         });
         break;

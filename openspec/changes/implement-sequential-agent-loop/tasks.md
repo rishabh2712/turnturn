@@ -331,7 +331,7 @@ These items are per adapter, not global. One shared checkbox cannot express "don
 
 Found in review of T4R and not fixed by it. T4R shipped as complete with these outstanding, which is why they are written down here rather than left in a conversation. Review findings that live only in chat evaporate.
 
-**Bug (h): a tool call with no provider id produces a completion that never started.** *(live; raised in T4R review, unfixed)*
+**Bug (h): a tool call with no provider id produces a completion that never started.** *(fixed during web harness work)*
 
 `tool-calls.ts` gates `tool-call-start` and `tool-call-arguments-delta` on `call.callId !== undefined`, but `parseToolArguments` falls back to `call.callId ?? call.syntheticCallId`. So if a provider never sends an `id`:
 
@@ -341,15 +341,15 @@ Found in review of T4R and not fixed by it. T4R shipped as complete with these o
 
 That last point is the serious half of bug (c) relocated rather than removed. Newly reachable now that T4A puts tools on the wire, and the Ollama OpenAI-compat lane is exactly where ids are flaky.
 
-- [ ] Treat a tool call that completes with no provider-supplied id as `failed: { kind: "protocol" }`. A provider emitting tool calls without ids is non-conformant and its conversation cannot be round-tripped, so fail loudly rather than inventing an id. Consistent with the B3/B4 discipline applied everywhere else.
-- [ ] Delete `syntheticCallId` once nothing depends on it.
-- [ ] Test: a tool-call stream with no `id` at any point fails as `protocol` and emits no `tool-call-complete`.
+- [x] Treat a tool call that completes with no provider-supplied id as `failed: { kind: "protocol" }`. A provider emitting tool calls without ids is non-conformant and its conversation cannot be round-tripped, so fail loudly rather than inventing an id. Consistent with the B3/B4 discipline applied everywhere else.
+- [x] Delete `syntheticCallId` once nothing depends on it.
+- [x] Test: a tool-call stream with no `id` at any point fails as `protocol` and emits no `tool-call-complete`.
 
 **Bug (i): `callIds()` computes a second, disagreeing synthetic id.**
 
 `callIds()` uses the array position while `syntheticCallId` uses the map key, so with keys `{1, 3}` one yields `tool-0, tool-1` and the other `tool-1, tool-3`. Only consumed by an error message, so the impact is a misleading diagnostic — but two disagreeing synthetic ids is the smell that points at bug (h).
 
-- [ ] Resolve as part of bug (h); both disappear when synthetic ids do.
+- [x] Resolve as part of bug (h); both disappear when synthetic ids do.
 
 **Gap: no `frames.test.mjs`.**
 
@@ -429,7 +429,7 @@ One wrinkle to settle when that work starts: `conversation.created` spans sessio
 
 - [x] Do not extend `session-provider-history.ts`. Any new model-visible record type is a signal to do the session-scoped sink, not to grow the fork.
 - [x] Keep it internal — removed from the `src/index.ts` barrel export so it cannot become a downstream dependency. Only `provider-step-runner.ts` may import it.
-- [ ] Delete it as part of the session-scoped durable log work, before Milestone 5's protocol change or Milestone 7's hydration.
+- [x] Delete it as part of the session-scoped durable log work, before Milestone 5's protocol change or Milestone 7's hydration.
 
 ## T4E — End-to-End Runner Spike
 

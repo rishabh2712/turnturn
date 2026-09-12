@@ -141,21 +141,21 @@ function applyFinishReason(finishReason: string, state: TranslationState): Provi
 
   const events: ProviderEvent[] = [];
   if (reason === "tool-use") {
-    const completedCalls = state.toolCalls.completedCalls();
-    if (completedCalls === undefined) {
+    const completion = state.toolCalls.completedCalls();
+    if (!completion.ok) {
       state.done = true;
       return [
         {
           type: "failed",
           error: {
             kind: "protocol",
-            message: `Tool call ${state.toolCalls.callIds().join(", ")} completed without parseable JSON arguments`,
+            message: completion.message,
             retryable: false,
           },
         },
       ];
     }
-    for (const call of completedCalls) {
+    for (const call of completion.calls) {
       events.push({ type: "tool-call-complete", call });
     }
   }

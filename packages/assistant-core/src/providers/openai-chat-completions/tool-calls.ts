@@ -38,18 +38,31 @@ export class ChatToolCallAssembler {
     return events;
   }
 
-  completedCalls(): ProviderToolCall[] | undefined {
+  completedCalls():
+    | { readonly ok: true; readonly calls: readonly ProviderToolCall[] }
+    | { readonly ok: false; readonly message: string } {
     const completed: ProviderToolCall[] = [];
     for (const call of this.calls.values()) {
+      if (call.callId === undefined) {
+        return {
+          ok: false,
+          message: "Tool call completed without a provider id",
+        };
+      }
       const parsed = this.parseToolArguments(call);
-      if (parsed === undefined) return undefined;
+      if (parsed === undefined) {
+        return {
+          ok: false,
+          message: `Tool call ${call.callId} completed without parseable JSON arguments`,
+        };
+      }
       completed.push(parsed);
     }
-    return completed;
+    return { ok: true, calls: completed };
   }
 
   callIds(): readonly string[] {
-    return [...this.calls.values()].map((call, index) => call.callId ?? `tool-${index}`);
+    return [...this.calls.values()].map((call) => call.callId ?? "<missing-provider-id>");
   }
 
   private callFor(update: ToolCallUpdate): MutableToolCall {
@@ -57,7 +70,6 @@ export class ChatToolCallAssembler {
     if (existing !== undefined) return existing;
     const created = {
       callId: update.callId,
-      syntheticCallId: `tool-${update.index}`,
       name: update.name,
       argumentsText: "",
       bufferedArgumentsDelta: "",
@@ -70,7 +82,8 @@ export class ChatToolCallAssembler {
   private parseToolArguments(call: MutableToolCall): ProviderToolCall | undefined {
     try {
       const input = JSON.parse(call.argumentsText) as JsonValue;
-      return { callId: call.callId ?? call.syntheticCallId, name: call.name, input };
+      if (call.callId === undefined) return undefined;
+      return { callId: call.callId, name: call.name, input };
     } catch {
       return undefined;
     }
@@ -79,7 +92,6 @@ export class ChatToolCallAssembler {
 
 interface MutableToolCall {
   callId: string | undefined;
-  syntheticCallId: string;
   name: string;
   argumentsText: string;
   bufferedArgumentsDelta: string;

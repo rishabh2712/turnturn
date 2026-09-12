@@ -1,0 +1,261 @@
+:root {
+  color: #f2efe8;
+  background: #11100f;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #6e6359;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  color: #fff8ee;
+  background: #2f2924;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+textarea {
+  min-height: 4rem;
+  resize: vertical;
+  border: 1px solid #3f3832;
+  border-radius: 1rem;
+  padding: 1rem;
+  color: #fff8ee;
+  background: #171513;
+}
+
+.shell {
+  display: grid;
+  gap: 1rem;
+  max-width: 1400px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.topbar,
+.approval,
+article {
+  border: 1px solid #302b26;
+  border-radius: 1.5rem;
+  padding: 1.25rem;
+  background: #191614;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.eyebrow,
+.muted {
+  color: #b5a89b;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+}
+
+h1,
+h2 {
+  margin: 0 0 0.5rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.42fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.chat-panel {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 1rem;
+  min-height: 70vh;
+}
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow: auto;
+  padding: 0.25rem;
+}
+
+.empty-chat {
+  display: grid;
+  place-content: center;
+  min-height: 22rem;
+  color: #b5a89b;
+  text-align: center;
+}
+
+.message {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.message.user {
+  margin-left: auto;
+  width: min(760px, 92%);
+}
+
+.message.assistant {
+  width: min(860px, 96%);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid #3f3832;
+  border-radius: 999px;
+  color: #d9cabc;
+  background: #211d19;
+  font-size: 0.8rem;
+}
+
+.bubble {
+  border: 1px solid #332e29;
+  border-radius: 1.2rem;
+  padding: 1rem;
+  background: #141210;
+}
+
+.user .bubble {
+  border-color: #635346;
+  background: #2a211b;
+}
+
+.message-text {
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.streaming {
+  display: inline-block;
+  margin-top: 0.75rem;
+  color: #b5a89b;
+  font-size: 0.8rem;
+}
+
+.chat-event {
+  align-self: center;
+  display: grid;
+  gap: 0.25rem;
+  max-width: min(720px, 90%);
+  border: 1px solid #3b342e;
+  border-radius: 0.9rem;
+  padding: 0.65rem 0.85rem;
+  color: #d8cbbf;
+  background: #171310;
+  font-size: 0.9rem;
+}
+
+.chat-event.tool {
+  border-color: #454a32;
+}
+
+.chat-event.approval {
+  border-color: #80643c;
+}
+
+.chat-event.error {
+  border-color: #7c3f3f;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  border: 1px solid #302b26;
+  border-radius: 1.25rem;
+  padding: 0.75rem;
+  background: #11100f;
+}
+
+.composer textarea {
+  min-height: 3.5rem;
+  max-height: 12rem;
+}
+
+.debug-panel {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.debug-panel section {
+  border: 1px solid #302b26;
+  border-radius: 1.5rem;
+  padding: 1.25rem;
+  background: #191614;
+}
+
+.timeline {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 0;
+  list-style: none;
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: 4rem 12rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  border-bottom: 1px solid #2b2622;
+  padding: 0.5rem 0;
+}
+
+code,
+pre {
+  overflow: auto;
+  color: #c7f0c2;
+  white-space: pre-wrap;
+  max-height: 28rem;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline li {
+    grid-template-columns: 1fr;
+  }
+}

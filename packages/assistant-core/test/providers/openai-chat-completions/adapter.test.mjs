@@ -151,6 +151,39 @@ test("OpenAI chat-completions parser rejects tool_calls finish with no accumulat
   ]);
 });
 
+test("OpenAI chat-completions parser rejects completed tool calls without provider ids", async () => {
+  const events = await collect(
+    sse([
+      {
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, type: "function", function: { name: "read", arguments: '{"path":"README.md"}' } },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      },
+    ]),
+  );
+
+  assert.deepEqual(events, [
+    {
+      type: "failed",
+      error: {
+        kind: "protocol",
+        message: "Tool call completed without a provider id",
+        retryable: false,
+      },
+    },
+  ]);
+});
+
 test("OpenAI chat-completions parser reports unknown finish reason as provider protocol failure", async () => {
   const events = await collect(
     sse([

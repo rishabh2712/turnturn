@@ -41,7 +41,21 @@ export class RecordEmitter {
   private appendChain: Promise<void> = Promise.resolve();
   private readonly recordsBySession = new Map<SessionId, DurableRecord[]>();
 
-  constructor(private readonly options: RecordEmitterOptions) {}
+  constructor(private readonly options: RecordEmitterOptions) {
+    const loaded = new Map<SessionId, DurableRecord[]>();
+    for (const record of options.durable.records()) {
+      const session = loaded.get(record.sessionId) ?? [];
+      session.push(record);
+      loaded.set(record.sessionId, session);
+    }
+    for (const [sessionId, records] of loaded) this.seedSessionRecords(sessionId, records);
+  }
+
+  seedSessionRecords(sessionId: SessionId, records: readonly DurableRecord[]): void {
+    if (records.some((record) => record.sessionId !== sessionId))
+      throw new Error("Cannot hydrate records from another session");
+    this.recordsBySession.set(sessionId, [...records]);
+  }
 
   async conversationCreated(
     command: CommandEnvelope,
@@ -79,7 +93,7 @@ export class RecordEmitter {
 
   async assistantMessageCompleted(
     command: CommandEnvelope,
-    scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId">>,
+    scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId" | "stepId">>,
     content: string,
   ): Promise<DurableRecord<typeof Durable.AssistantMessageCompleted>> {
     return await this.append(command, Durable.AssistantMessageCompleted, scope, { content });
@@ -220,11 +234,17 @@ export class RecordEmitter {
     return record;
   }
 
-  async contentDelta(scope: Partial<RecordScope>, text: string): Promise<void> {
+  async contentDelta(
+    scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId" | "stepId">>,
+    text: string,
+  ): Promise<void> {
     await this.publishLive(Live.ContentDelta, scope, { text });
   }
 
-  async reasoningDelta(scope: Partial<RecordScope>, text: string): Promise<void> {
+  async reasoningDelta(
+    scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId" | "stepId">>,
+    text: string,
+  ): Promise<void> {
     await this.publishLive(Live.ReasoningDelta, scope, { text });
   }
 
