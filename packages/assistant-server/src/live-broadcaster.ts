@@ -1,5 +1,5 @@
 import type { LiveSink } from "@turnturn/assistant-core/ports";
-import type { LiveEvent } from "@turnturn/protocol";
+import type { ConversationId, LiveEvent, SessionId } from "@turnturn/protocol";
 import { LiveEventTypes, SCHEMA_VERSION, serializeJson } from "@turnturn/protocol";
 import type { RuntimeClock, RuntimeIds } from "./ids.js";
 
@@ -23,6 +23,13 @@ interface Subscriber {
   readonly queue: string[];
   flushing: boolean;
   droppedDeltaWarning: boolean;
+  readonly conversationId?: ConversationId;
+}
+
+export interface ConversationSnapshot {
+  readonly conversationId: ConversationId;
+  readonly serverInstanceId: string;
+  readonly sessions: readonly { readonly sessionId: SessionId; readonly lastSequence: number }[];
 }
 
 export class LiveBroadcaster implements LiveSink {
@@ -37,21 +44,23 @@ export class LiveBroadcaster implements LiveSink {
   publish(event: LiveEvent): void {
     const frame = sseFrame(event.type, event);
     for (const subscriber of this.subscribers.values()) {
+      if (subscriber.conversationId !== undefined && subscriber.conversationId !== event.conversationId) continue;
       this.enqueue(subscriber, frame, event);
     }
   }
 
-  subscribe(sink: SseWritable): () => void {
+  subscribe(sink: SseWritable, snapshot?: ConversationSnapshot): () => void {
     const subscriber: Subscriber = {
       id: this.nextSubscriberId,
       sink,
       queue: [],
       flushing: false,
       droppedDeltaWarning: false,
+      ...(snapshot === undefined ? {} : { conversationId: snapshot.conversationId }),
     };
     this.nextSubscriberId += 1;
     this.subscribers.set(subscriber.id, subscriber);
-    this.enqueue(subscriber, sseFrame("snapshot", { snapshotSequence: this.options.currentSequence() }));
+    this.enqueue(subscriber, sseFrame("snapshot", snapshot ?? { snapshotSequence: this.options.currentSequence() }));
     return () => {
       this.subscribers.delete(subscriber.id);
     };
@@ -68,7 +77,7 @@ export class LiveBroadcaster implements LiveSink {
       if (!subscriber.droppedDeltaWarning) {
         subscriber.droppedDeltaWarning = true;
         subscriber.queue.shift();
-        subscriber.queue.push(this.queueGapWarning());
+        subscriber.queue.push(this.queueGapWarning(subscriber));
       } else {
         subscriber.queue.shift();
       }
@@ -96,12 +105,13 @@ export class LiveBroadcaster implements LiveSink {
     subscriber.flushing = false;
   }
 
-  private queueGapWarning(): string {
+  private queueGapWarning(subscriber: Subscriber): string {
     return sseFrame("warning", {
       schemaVersion: SCHEMA_VERSION,
       eventId: this.options.ids.eventId(),
       type: LiveEventTypes.Warning,
       createdAt: this.options.clock.now(),
+      ...(subscriber.conversationId === undefined ? {} : { conversationId: subscriber.conversationId }),
       payload: {
         code: "LIVE_QUEUE_OVERFLOW",
         message: "Live event queue overflowed; resume from durable records.",

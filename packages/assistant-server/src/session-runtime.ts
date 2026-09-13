@@ -52,6 +52,7 @@ export class SessionRuntimeRegistry {
   private readonly clock: EngineClock;
   private readonly maxOpen: number;
   private readonly idleMs: number;
+  private readonly idleWaiters: Array<() => void> = [];
 
   constructor(private readonly options: SessionRuntimeRegistryOptions) {
     this.ids = options.ids ?? new RuntimeIds();
@@ -97,11 +98,25 @@ export class SessionRuntimeRegistry {
       entry.activeCommands -= 1;
       entry.lastUsed = Date.now();
       this.sweep();
+      if ([...this.runtimes.values()].every((candidate) => candidate.activeCommands === 0)) {
+        for (const resolve of this.idleWaiters.splice(0)) resolve();
+      }
     }
   }
 
   size(): number {
     return this.runtimes.size;
+  }
+
+  isConversationBusy(conversationId: ConversationId): boolean {
+    return [...this.runtimes.values()].some(
+      (entry) => entry.runtime.conversationId === conversationId && entry.activeCommands > 0,
+    );
+  }
+
+  async waitForIdle(): Promise<void> {
+    if ([...this.runtimes.values()].every((entry) => entry.activeCommands === 0)) return;
+    await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
   }
 
   sweep(now = Date.now()): void {

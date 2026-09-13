@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { env, exit, stdout } from "node:process";
 import { loadEnvFile } from "./env-file.js";
 import { createAssistantHttpServer } from "./http-server.js";
+import { createPersistentRuntime } from "./persistent-runtime.js";
 import { createAssistantRuntime, type ProviderKind } from "./runtime.js";
 
 loadEnvFile();
@@ -33,7 +34,13 @@ const runtime = createAssistantRuntime({
   model,
   ...(maxTokens === undefined ? {} : { maxTokens }),
 });
-const server = createAssistantHttpServer({ runtime, token, ...(staticDir === undefined ? {} : { staticDir }) });
+const persistent = await createPersistentRuntime(runtime, { port });
+const server = createAssistantHttpServer({
+  runtime,
+  persistent,
+  token,
+  ...(staticDir === undefined ? {} : { staticDir }),
+});
 
 server.listen(port, "127.0.0.1", () => {
   stdout.write(`turnturn assistant server http://127.0.0.1:${port}\n`);

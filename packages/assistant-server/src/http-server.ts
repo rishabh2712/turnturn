@@ -1,8 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import type { CommandEnvelope, DurableRecord } from "@turnturn/protocol";
+import { type CommandEnvelope, CommandTypes, type ConversationId, parseId } from "@turnturn/protocol";
+import { handleConversationApi } from "./api/conversations.js";
+import { handleReadOnlyApi } from "./api/read-only.js";
 import { jsonRoundTrip, parseJsonBody, writeJson } from "./json.js";
+import type { ConversationSnapshot } from "./live-broadcaster.js";
+import type { PersistentRuntime } from "./persistent-runtime.js";
 import type { AssistantRuntime } from "./runtime.js";
 import { runtimeDebugState } from "./runtime.js";
 import { authorizeRequest } from "./security.js";
@@ -11,42 +15,77 @@ export interface CreateAssistantHttpServerOptions {
   readonly runtime: AssistantRuntime;
   readonly staticDir?: string;
   readonly token: string;
+  readonly persistent?: PersistentRuntime;
 }
 
 export function createAssistantHttpServer(options: CreateAssistantHttpServerOptions): Server {
-  return createServer((req, res) => {
-    handleRequest(req, res, options).catch((error: unknown) => {
+  const inFlight = new Map<string, { turnId: string; promise: Promise<unknown> }>();
+  const server = createServer((req, res) => {
+    handleRequest(req, res, options, inFlight).catch((error: unknown) => {
       writeJson(res, 500, {
         error: { code: "INTERNAL_ERROR", message: error instanceof Error ? error.message : String(error) },
       });
     });
   });
+  if (options.persistent !== undefined) {
+    server.on("close", () => {
+      void Promise.allSettled([...inFlight.values()].map((entry) => entry.promise)).then(() =>
+        options.persistent?.close(),
+      );
+    });
+  }
+  return server;
 }
 
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   options: CreateAssistantHttpServerOptions,
+  inFlight: Map<string, { turnId: string; promise: Promise<unknown> }>,
 ): Promise<void> {
   const method = req.method ?? "GET";
   if (!authorizeRequest(req, res, options.token)) return;
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
+  if (options.persistent !== undefined && (await handleConversationApi(req, res, url, options.persistent))) return;
+  if (options.persistent !== undefined && (await handleReadOnlyApi(req, res, url, options.runtime, options.persistent)))
+    return;
+
   if (method === "POST" && url.pathname === "/commands") {
-    await postCommand(req, res, options.runtime);
+    await postCommand(req, res, options.runtime, options.persistent, inFlight);
     return;
   }
 
   if (method === "GET" && url.pathname === "/events") {
+    let snapshot: ConversationSnapshot | undefined;
+    const persistent = options.persistent;
+    if (persistent !== undefined) {
+      let conversationId: ConversationId;
+      try {
+        conversationId = parseId("conv", url.searchParams.get("conversationId") ?? "");
+      } catch {
+        writeJson(res, 400, { error: { code: "CONVERSATION_REQUIRED" } });
+        return;
+      }
+      const conversation = await persistent.store.get(conversationId);
+      if (conversation === undefined) {
+        writeJson(res, 404, { error: { code: "CONVERSATION_NOT_FOUND" } });
+        return;
+      }
+      snapshot = {
+        conversationId,
+        serverInstanceId: persistent.serverInstanceId,
+        sessions: await Promise.all(
+          conversation.sessions.map(async (session) => {
+            const opened = await persistent.sessions.open(conversationId, session.sessionId);
+            return { sessionId: session.sessionId, lastSequence: opened.durable.records().at(-1)?.sequence ?? 0 };
+          }),
+        ),
+      };
+    }
     openEvents(res);
-    const cleanup = options.runtime.live.subscribe(res);
+    const cleanup = options.runtime.live.subscribe(res, snapshot);
     req.on("close", cleanup);
-    return;
-  }
-
-  if (method === "GET" && url.pathname === "/records") {
-    const afterSequence = parseSequence(url.searchParams.get("afterSequence") ?? "0");
-    writeJson(res, 200, { records: recordsAfter(options.runtime.records(), afterSequence) });
     return;
   }
 
@@ -55,7 +94,11 @@ async function handleRequest(
     return;
   }
 
-  if (method === "GET" && options.staticDir !== undefined) {
+  if (
+    method === "GET" &&
+    options.staticDir !== undefined &&
+    !["/api", "/records"].some((path) => url.pathname === path || url.pathname.startsWith(`${path}/`))
+  ) {
     const served = await serveStatic(url.pathname, res, options.staticDir, options.token);
     if (served) return;
   }
@@ -63,7 +106,13 @@ async function handleRequest(
   writeJson(res, 404, { error: { code: "NOT_FOUND", message: `No route for ${method} ${url.pathname}` } });
 }
 
-async function postCommand(req: IncomingMessage, res: ServerResponse, runtime: AssistantRuntime): Promise<void> {
+async function postCommand(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: AssistantRuntime,
+  persistent: PersistentRuntime | undefined,
+  inFlight: Map<string, { turnId: string; promise: Promise<unknown> }>,
+): Promise<void> {
   let parsed: unknown;
   try {
     parsed = parseJsonBody(await readBody(req));
@@ -84,6 +133,41 @@ async function postCommand(req: IncomingMessage, res: ServerResponse, runtime: A
     return;
   }
 
+  if (persistent !== undefined) {
+    if (command.conversationId === undefined || command.sessionId === undefined) {
+      writeJson(res, 404, { error: { code: "SESSION_NOT_FOUND" } });
+      return;
+    }
+    try {
+      await persistent.sessions.open(command.conversationId, command.sessionId);
+    } catch {
+      writeJson(res, 404, { error: { code: "SESSION_NOT_FOUND" } });
+      return;
+    }
+    if (command.type === CommandTypes.TurnSubmit && command.turnId !== undefined) {
+      const conversationId = command.conversationId;
+      const key =
+        command.idempotencyKey === undefined
+          ? command.commandId
+          : `${command.conversationId}:${command.idempotencyKey}`;
+      const existing = inFlight.get(key);
+      if (existing !== undefined) {
+        writeJson(res, 202, { kind: "accepted", turnId: existing.turnId });
+        return;
+      }
+      const promise = persistent.sessions.submit(command).then(async (outcome) => {
+        if (outcome.kind === "accepted") await persistent.store.maybeAutoTitle(conversationId, command.payload.input);
+        return outcome;
+      });
+      inFlight.set(key, { turnId: command.turnId, promise });
+      void promise.catch(() => {}).finally(() => inFlight.delete(key));
+      writeJson(res, 202, { kind: "accepted", turnId: command.turnId });
+      return;
+    }
+    const outcome = await persistent.sessions.submit(command);
+    writeJson(res, 200, jsonRoundTrip(outcome));
+    return;
+  }
   const outcome = await runtime.engine.submit(command);
   writeJson(res, 200, jsonRoundTrip(outcome));
 }
@@ -94,16 +178,6 @@ function openEvents(res: ServerResponse): void {
     "cache-control": "no-store",
     connection: "keep-alive",
   });
-}
-
-function recordsAfter(records: readonly DurableRecord[], afterSequence: number): readonly DurableRecord[] {
-  return records.filter((record) => record.sequence > afterSequence);
-}
-
-function parseSequence(value: string): number {
-  const sequence = Number(value);
-  if (!Number.isInteger(sequence) || sequence < 0) return 0;
-  return sequence;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

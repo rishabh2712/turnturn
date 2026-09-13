@@ -6,7 +6,13 @@ import {
   OpenAIChatCompletionsAdapter,
   ollamaChatCompletions,
 } from "@turnturn/assistant-core";
-import type { AssistantEngine, DurableSink, ProviderPort } from "@turnturn/assistant-core/ports";
+import type {
+  AssistantEngine,
+  DurableSink,
+  ProviderPort,
+  ToolExecutorPort,
+  ToolPolicyPort,
+} from "@turnturn/assistant-core/ports";
 import type { DurableRecord } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { RuntimeClock, RuntimeIds } from "./ids.js";
@@ -31,6 +37,9 @@ export interface AssistantRuntime {
   readonly engine: AssistantEngine;
   readonly ids: RuntimeIds;
   readonly live: LiveBroadcaster;
+  readonly provider: ProviderPort;
+  readonly tools: ToolExecutorPort;
+  readonly policy: ToolPolicyPort;
   records(): readonly DurableRecord[];
 }
 
@@ -55,9 +64,9 @@ export function createAssistantRuntime(config: AssistantServerConfig): Assistant
     durable,
     ids,
     live,
-    policy,
     provider,
     tools,
+    policy,
   });
 
   return {
@@ -67,6 +76,9 @@ export function createAssistantRuntime(config: AssistantServerConfig): Assistant
     engine,
     ids,
     live,
+    provider,
+    tools,
+    policy,
     records: () => durable.records(),
   };
 }

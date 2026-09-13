@@ -15,7 +15,7 @@ import {
 } from "@turnturn/protocol";
 import { createAssistantHttpServer, createAssistantRuntime } from "../dist/index.js";
 
-test("POST /commands round-trips commands and GET /records resumes without duplicates", async () => {
+test("POST /commands round-trips commands while global /records is absent", async () => {
   const harness = await startHarness();
   try {
     const conversationId = formatConversationId(randomUUID());
@@ -36,17 +36,7 @@ test("POST /commands round-trips commands and GET /records resumes without dupli
     assert.equal(session.status, 200);
     assert.equal(session.body.kind, "accepted");
 
-    const first = await getJson(harness.url("/records?afterSequence=0"));
-    const second = await getJson(harness.url("/records?afterSequence=1"));
-
-    assert.deepEqual(
-      first.body.records.map((record) => record.sequence),
-      [1, 2],
-    );
-    assert.deepEqual(
-      second.body.records.map((record) => record.sequence),
-      [2],
-    );
+    assert.equal((await getJson(harness.url("/records?afterSequence=0"))).status, 404);
   } finally {
     await harness.close();
   }
@@ -111,8 +101,7 @@ test("host, origin, and token checks refuse requests before reaching the engine"
       assert.equal(response.body.error.code, code);
       assert.equal(response.headers["access-control-allow-origin"], undefined);
     }
-    const records = await getJson(harness.url("/records"));
-    assert.deepEqual(records.body.records, []);
+    assert.equal((await getJson(harness.url("/records"))).status, 404);
   } finally {
     await harness.close();
   }
@@ -126,8 +115,8 @@ test("served HTML receives the process token while other responses do not expose
     const page = await fetch(harness.url("/"));
     assert.equal(page.status, 200);
     assert.match(await page.text(), /window\.__TURNTURN__=\{token:"test-token"\}/);
-    const records = await getJson(harness.url("/records"));
-    assert.doesNotMatch(JSON.stringify(records.body), /test-token/);
+    const debug = await getJson(harness.url("/debug/state"));
+    assert.doesNotMatch(JSON.stringify(debug.body), /test-token/);
   } finally {
     await harness.close();
     await rm(staticDir, { recursive: true, force: true });

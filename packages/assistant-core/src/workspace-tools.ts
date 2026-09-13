@@ -24,6 +24,7 @@ export interface WorkspaceToolExecutorOptions {
 }
 
 export { workspaceToolDefinitions };
+export { WorkspacePathGuard } from "./workspace/path-guard.js";
 
 export function createWorkspaceToolExecutor(options: WorkspaceToolExecutorOptions): ToolExecutorPort {
   return new WorkspaceToolExecutor(options);
