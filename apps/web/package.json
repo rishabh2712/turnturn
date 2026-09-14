@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@turnturn/chat-client": "workspace:^",
+    "@turnturn/protocol": "workspace:^",
     "@vitejs/plugin-react": "latest",
     "react": "latest",
     "react-dom": "latest",
@@ -18,8 +20,10 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "happy-dom": "^20.14.5",
     "vitest": "^5.0.0"
   }
 }

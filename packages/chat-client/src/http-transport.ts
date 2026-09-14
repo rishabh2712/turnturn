@@ -49,8 +49,9 @@ export class HttpChatTransport implements ChatTransport {
     return this.request("GET", `/api/conversations?${query(params)}`);
   }
 
-  createConversation(params: CreateConversationParams): Promise<ConversationSummary> {
-    return this.request("POST", "/api/conversations", params);
+  async createConversation(params: CreateConversationParams): Promise<ConversationSummary> {
+    const body = await this.request<{ conversation: ConversationSummary }>("POST", "/api/conversations", params);
+    return body.conversation;
   }
 
   getConversation(conversationId: ConversationId): Promise<ConversationDetail> {
@@ -61,8 +62,16 @@ export class HttpChatTransport implements ChatTransport {
     return this.request("POST", `/api/conversations/${conversationId}/activate`);
   }
 
-  patchConversation(conversationId: ConversationId, patch: PatchConversationParams): Promise<ConversationSummary> {
-    return this.request("PATCH", `/api/conversations/${conversationId}`, patch);
+  async patchConversation(
+    conversationId: ConversationId,
+    patch: PatchConversationParams,
+  ): Promise<ConversationSummary> {
+    const body = await this.request<{ conversation: ConversationSummary }>(
+      "PATCH",
+      `/api/conversations/${conversationId}`,
+      patch,
+    );
+    return body.conversation;
   }
 
   async deleteConversation(conversationId: ConversationId): Promise<void> {

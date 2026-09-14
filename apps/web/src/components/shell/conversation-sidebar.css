@@ -1,0 +1,176 @@
+.tt-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  background: #f7f7f5;
+  border-right: 1px solid #e9e9e6;
+  color: #252525;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.tt-sidebar-top {
+  padding: 22px 14px 13px;
+}
+
+.tt-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 20px;
+  font-size: 15px;
+  font-weight: 690;
+  letter-spacing: -0.02em;
+}
+
+.tt-sidebar-brand-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 6px;
+  background: #20201f;
+  color: white;
+  font-size: 13px;
+}
+
+.tt-new-conversation {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e5e5e1;
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: white;
+  color: #252525;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.tt-new-conversation:hover,
+.tt-conversation-row:hover {
+  background: #eeeeeb;
+}
+
+.tt-new-conversation span:first-child {
+  font-size: 18px;
+  line-height: 12px;
+}
+
+.tt-sidebar-navigation {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 18px;
+}
+
+.tt-sidebar-workspace {
+  overflow: hidden;
+  margin: 0;
+  padding: 12px 12px 7px;
+  color: #82827c;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tt-sidebar-empty {
+  margin: 8px 12px;
+  color: #85857f;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tt-conversation-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tt-conversation-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 2px 3px;
+}
+
+.tt-conversation-row.is-selected {
+  background: #eaeae7;
+}
+
+.tt-conversation-select {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 7px 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.tt-conversation-mark {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border: 1px solid #a1a19c;
+  border-radius: 50%;
+}
+
+.tt-conversation-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-conversation-action {
+  border: 0;
+  border-radius: 5px;
+  padding: 5px;
+  background: transparent;
+  color: #777770;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+}
+
+.tt-conversation-row:hover .tt-conversation-action,
+.tt-conversation-action:focus-visible {
+  opacity: 1;
+}
+
+.tt-conversation-rename {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid #a9a9a3;
+  border-radius: 5px;
+  padding: 6px;
+  background: white;
+  font: inherit;
+  font-size: 13px;
+}
+
+.tt-archived-section {
+  margin-top: 18px;
+}
+
+.tt-archived-section summary {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 12px;
+  color: #777770;
+  cursor: pointer;
+  font-size: 12px;
+}

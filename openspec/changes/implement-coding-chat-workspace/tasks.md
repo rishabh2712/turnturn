@@ -26,6 +26,23 @@ Copied from `packages/protocol` and `implement-sequential-agent-loop/tasks.md`. 
 
 ## Implementation Tasks
 
+### Dogfood-first slice (priority order; existing stage checklists remain acceptance criteria)
+
+Rishabh asked on 2026-09-14 to reach a real browser conversation sooner, instead of finishing each component family before trying the whole product. Work vertically across T4, T6, T7, and T8 in this order. Do not mark the broader stages complete from this slice alone; return to their detailed tests and polish after it works. The real reconnect proof in 4.8 remains deferred, not waived.
+
+- [x] D1 Start the real `assistant-server` and web app against a local Ollama model, with the server-issued token, and verify `/api/runtime` reports the intended workspace/provider/model. Verified in the served browser UI with `qwen3.8:27b-mlx` on 2026-09-14. The server is not a background service; restart it from a terminal for further testing. A LiteLLM model is a second run, not a prerequisite for the first.
+- [x] D2 Replace the debug harness with a minimal transport-backed shell: conversation list and selection, plain-text transcript from `ConversationStore`, and a composer. Keep record/event interpretation in `chat-client`; no default timeline or raw JSON. The first browser send showed a user message and `waiting-for-model`; its durable-versus-optimistic source and the model response were not verified before the test server stopped.
+- [ ] D3 Send one message through the real browser, show the user message immediately, stream assistant text, and refresh to recover the same durable transcript. Make the send path a proper testable client action, not command construction buried in a visual component.
+- [ ] D4 Make one model-driven tool call visible as a collapsed summary, and allow/deny one approval inline. Literal text is sufficient for this slice; rich Markdown, syntax highlighting, responsive polish, and developer mode follow the existing stages.
+- [ ] D5 Dogfood the exact flow on a real workspace; record concrete failures as tasks, then complete the remaining stage acceptance checks. No credentials in logs or screenshots.
+
+Dogfood checkpoint, 2026-09-14:
+
+- Ollama: the built React page loaded the configured `qwen3.8:27b-mlx` runtime; the first browser send created a conversation and displayed the user text. A completed model reply and refresh recovery were not observed, so D3 remains open.
+- LiteLLM: the saved gateway configuration authenticated (`GET /v1/models` returned 200), and the configured `bedrock-claude-5-sonnet` model was listed. The local assistant server was restarted on port 8787 with `openai-chat-completions` and that model; HTTP 200 confirmed the page is served. A browser turn through LiteLLM has **not** been verified yet. Refresh the page after the server switch because its browser token changes each start.
+- Tool definitions are sent by the engine, and the shell has a collapsed tool-activity view, but no real model-driven tool round trip has been observed in this UI. The approval request is text-only—Allow/Deny is not wired—and successful `turn.completed` is currently hidden. D4 remains open; avoid shell/write/edit dogfooding until approval controls land.
+- The `resumeConversation` snapshot/live ordering mismatch and the real reconnect test remain open under 4.8. Do not count the fake-transport test as the browser proof.
+
 ### 1. T0 — Correctness prerequisites
 
 Five defects in `assistant-core`, each blocking a client-side correctness property, plus the repo hygiene that makes the rest of the work measurable. Doing these first is not tidiness: S12 makes the T13 acceptance proof impossible, and S10 makes "no duplicate assistant text" unprovable.
@@ -98,6 +115,8 @@ Depends on: stage 3 (for the transport implementation; the projector itself depe
 - [ ] 4.8 Define `transport.ts` (`ChatTransport`) and implement `http-transport.ts` plus `resume.ts` (D21, D8). Verify against a real local `assistant-server`: snapshot-then-replay per session, `serverInstanceId` change forcing a full refetch and clearing live state, and the golden test — disconnect mid-turn, reconnect after it completes, and assert the projected view is identical to that of a client that never disconnected.
   - Done: `transport.ts` (`ChatTransport` interface), `resume.ts`, and `http-transport.ts` are all implemented. `resume.test.mjs` covers snapshot-triggered catch-up, pagination, restart-clears-live, first-connect-never-clears-live, live forwarding, a sessionless event, `onError`→`reconnecting`, `stop()`, and the golden disconnect/reconnect-equivalence test, against a fake `ChatTransport` (D21's stated purpose for a fake). `http-transport.test.mjs` covers every REST method against a real `node:http` server (auth header, query encoding, JSON body, empty 204, error-envelope mapping, a non-JSON error body not itself throwing, a 200 business-level `"rejected"` outcome staying data rather than a thrown error) and `subscribeEvents`'s own wiring (URL construction incl. token-in-query, snapshot vs. live-event routing, unsubscribe removing listeners and closing) against a minimal `EventSource` test double.
   - Remaining: the task's specific acceptance bar — verifying against a *real* local `assistant-server` — has not been run. A test double proves our wiring is correct; it cannot prove a real browser `EventSource` actually auto-reconnects and re-fires a snapshot after a genuine network drop (see `resume.ts`'s doc comment) — only a real server can. Leaving unchecked until that run happens.
+  - Deferred by Rishabh on 2026-09-14: proceed to the UI tasks now, but leave 4.8 unchecked and return to the real-server/browser reconnect proof before milestone acceptance. The real API response-shape check is part of that proof, not assumed from fake-server tests.
+  - Integration preparation completed while starting UI work: `HttpChatTransport.createConversation` and `patchConversation` now unwrap `{ conversation }`, with a failing test written first; `RuntimeInfo.baseUrlHost` and `maxTokens` now admit `null`. Still open: `resumeConversation` forwards live events immediately during snapshot replay rather than buffering them as D8 specifies. The real-server/browser reconnect proof remains open.
 
 Acceptance: every projector invariant has a test that fails without its implementation; the golden reconnect comparison passes; the package builds to a browser-safe bundle.
 
@@ -107,11 +126,11 @@ The first visible change. The debug surface goes away here rather than in stage 
 
 Files: replace `apps/web/src/App.tsx`; new `apps/web/src/{main.tsx, providers/*, components/shell/*}`, `apps/web/src/styles/*`; delete `apps/web/src/state.ts` and `apps/web/src/protocol.ts`; `apps/web/package.json`; `apps/web/test/*`.
 
-Depends on: stage 4.
+Depends on: stage 4's implemented client package. The remaining real-server/browser proof in 4.8 is explicitly deferred by Rishabh, not waived.
 
-- [ ] 5.1 Add `vitest`, `happy-dom`, and `@testing-library/react` to `apps/web` and land one real test so the suite is no longer vacuous. Verify `pnpm --filter @turnturn/web test` runs it.
-- [ ] 5.2 Delete `state.ts` and `protocol.ts` (C3–C7, C11) and rewrite `App.tsx` around `TransportProvider`, `RuntimeProvider`, and `ConversationListProvider`. Verify no module under `apps/web/src` declares a protocol type and no component reads a record or event directly.
-- [ ] 5.3 Build the sidebar: workspace group header, New conversation, conversation list ordered by last activity, per-row rename and archive, archived section. Verify component tests for create, rename, archive, and switch, driven through a fake `ChatTransport`.
+- [x] 5.1 Use the existing `vitest` runner, add `happy-dom` and `@testing-library/react`, and land a DOM-backed `TransportProvider` test. `pnpm --filter @turnturn/web test` runs it alongside the existing transport/proxy tests.
+- [x] 5.2 Delete `state.ts` and `protocol.ts` (C3–C7, C11) and rewrite `App.tsx` around `TransportProvider`, `RuntimeProvider`, and `ConversationListProvider`. The obsolete `transport.ts` was removed too. No component reads a durable record or live event directly; the browser transcript consumes `ConversationViewItem` from `ConversationStore`. Build, typecheck, tests, and lint pass.
+- [x] 5.3 Build the sidebar: workspace group header, New conversation, conversation list ordered by last activity, per-row rename and archive, archived section. Component tests cover create, rename, archive, and switch through a fake `ChatTransport`; the sidebar is wired into the served app.
 - [ ] 5.4 Build the header: inline-editable title, workspace chip, model chip, phase and connection summary, actions menu, and the read-only configuration popover showing workspace path, provider, model, and tool catalog with no credential (D22, spec "Configuration is visible without being editable"). Verify the popover contains no key and states that configuration is server-owned.
 - [ ] 5.5 Implement URL and local state: `/c/:conversationId` plus `?dev=1` in the URL, and last-conversation-id, per-conversation draft, sidebar collapse, and dev preference in `localStorage`. Verify selection restoration across a reload, the bare-`/` fallback chain, and that a draft survives switching away and back.
 - [ ] 5.6 Implement the empty, loading, disconnected, unopenable, and first-run states from `design.md` "Empty, loading, and failure states". Verify one test per state, including that the sidebar stays usable when a conversation cannot be opened.

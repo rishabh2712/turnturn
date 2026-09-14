@@ -61,7 +61,7 @@ test("createConversation sends a JSON body with the content-type header", async 
   const { server, baseUrl } = await startFakeServer((req, res, body) => {
     receivedContentType = req.headers["content-type"];
     receivedBody = body;
-    json(res, 201, { conversationId: "conv_1", workspaceKey: body.workspaceKey });
+    json(res, 201, { conversation: { conversationId: "conv_1", workspaceKey: body.workspaceKey } });
   });
   t.after(() => server.close());
 
@@ -70,6 +70,17 @@ test("createConversation sends a JSON body with the content-type header", async 
   assert.match(receivedContentType, /application\/json/);
   assert.deepEqual(receivedBody, { workspaceKey: "ws_1", title: "Hi" });
   assert.equal(created.workspaceKey, "ws_1");
+});
+
+test("patchConversation unwraps the server's conversation envelope", async (t) => {
+  const { server, baseUrl } = await startFakeServer((_req, res) => {
+    json(res, 200, { conversation: { conversationId: "conv_1", title: "Renamed" } });
+  });
+  t.after(() => server.close());
+
+  const transport = new HttpChatTransport({ baseUrl, token: "t" });
+  const updated = await transport.patchConversation("conv_1", { title: "Renamed" });
+  assert.equal(updated.title, "Renamed");
 });
 
 test("deleteConversation handles an empty 204 response", async (t) => {

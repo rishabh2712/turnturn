@@ -16,8 +16,8 @@ export interface RuntimeInfo {
   readonly workspace: WorkspaceSummary;
   readonly provider: string;
   readonly model: string;
-  readonly baseUrlHost: string;
-  readonly maxTokens: number;
+  readonly baseUrlHost: string | null;
+  readonly maxTokens: number | null;
   readonly serverInstanceId: string;
   readonly storageVersion: number;
   readonly schemaVersion: number;
