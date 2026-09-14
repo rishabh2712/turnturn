@@ -22,6 +22,7 @@ interface Subscriber {
   readonly sink: SseWritable;
   readonly queue: string[];
   flushing: boolean;
+  ready: boolean;
   droppedDeltaWarning: boolean;
   readonly conversationId?: ConversationId;
 }
@@ -50,17 +51,45 @@ export class LiveBroadcaster implements LiveSink {
   }
 
   subscribe(sink: SseWritable, snapshot?: ConversationSnapshot): () => void {
+    return this.register(
+      sink,
+      snapshot?.conversationId,
+      () => snapshot ?? { snapshotSequence: this.options.currentSequence() },
+    );
+  }
+
+  subscribeConversation(
+    sink: SseWritable,
+    conversationId: ConversationId,
+    collectSnapshot: () => ConversationSnapshot,
+  ): () => void {
+    return this.register(sink, conversationId, collectSnapshot);
+  }
+
+  private register(
+    sink: SseWritable,
+    conversationId: ConversationId | undefined,
+    collectSnapshot: () => ConversationSnapshot | { readonly snapshotSequence: number },
+  ): () => void {
     const subscriber: Subscriber = {
       id: this.nextSubscriberId,
       sink,
       queue: [],
       flushing: false,
+      ready: false,
       droppedDeltaWarning: false,
-      ...(snapshot === undefined ? {} : { conversationId: snapshot.conversationId }),
+      ...(conversationId === undefined ? {} : { conversationId }),
     };
     this.nextSubscriberId += 1;
     this.subscribers.set(subscriber.id, subscriber);
-    this.enqueue(subscriber, sseFrame("snapshot", snapshot ?? { snapshotSequence: this.options.currentSequence() }));
+    try {
+      subscriber.queue.unshift(sseFrame("snapshot", collectSnapshot()));
+      subscriber.ready = true;
+      this.flush(subscriber);
+    } catch (error) {
+      this.subscribers.delete(subscriber.id);
+      throw error;
+    }
     return () => {
       this.subscribers.delete(subscriber.id);
     };
@@ -84,7 +113,7 @@ export class LiveBroadcaster implements LiveSink {
     }
 
     subscriber.queue.push(frame);
-    this.flush(subscriber);
+    if (subscriber.ready) this.flush(subscriber);
   }
 
   private flush(subscriber: Subscriber): void {

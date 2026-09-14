@@ -2,9 +2,9 @@
 
 Milestone 3.5. Motivation is in `proposal.md`; requirements are in `specs/`; scope and exit criteria are in `ROADMAP.md`. This file holds decisions.
 
-Status: **awaiting review.** Per `openspec/project.md`, implementation does not start until Rishabh has reviewed this document. Three questions in "Open Questions" want an answer first; the rest of the design does not depend on them.
+Status: **awaiting review.** Per `openspec/project.md`, implementation does not start until Rishabh has reviewed this document. Four questions in "Open Questions" want an answer; question 4 determines whether exact provider-request diagnostics enter this milestone.
 
-**Gate tier: standard.** This change does not touch `packages/protocol`, any durable record schema, persisted policy semantics, or a public package API — it adds an on-disk layout and a client-facing HTTP surface that did not exist before. New, not altered. Both are contract-shaped once they exist, so the *first change to either* is contract-altering and needs the full ritual. See Decision 25.
+**Gate tier: standard, pending Open Question 4.** The implemented change does not alter a public package API. An exact provider-request diagnostic would need an observer in the exported adapter options, which would change this to the full gate; it is not implemented while that choice is unreviewed. See Decisions 22 and 25.
 
 ---
 
@@ -205,6 +205,8 @@ S7 is the live half of the mixing bug: two tabs on two conversations currently s
 
 Everything Amendment A and C settled stays: no `id:` field on the stream ever, bounded per-subscriber queues, deltas dropped before durable facts, at most one gap warning per overflow episode with a reserved slot. The `x-turnturn-last-sequence` header (S6) is deleted — `EventSource` cannot read it, so it is a contract the browser can never honour.
 
+The subscriber must be registered **before** reading those cursors. `LiveBroadcaster.subscribeConversation` buffers any event published while its synchronous snapshot callback runs, inserts the snapshot as the first frame, then drains the buffer. Reading cursors first and subscribing afterward loses an event at exactly that boundary; `events-resume.test.mjs` forces that order and fails on the former implementation.
+
 *Alternative.* **One unfiltered stream with client-side filtering** — rejected: it ships every conversation's content to every tab, wastes the bounded queue on events the subscriber will discard, and makes leakage a client-side bug away.
 
 ### D9 — Sessions, not the world, are the unit of replay
@@ -320,6 +322,8 @@ Law 8 says debug state must not become the application state source. The way tha
 
 Contents: connection state and `serverInstanceId`; the selected session's durable records; a bounded ring of the last 200 live events with superseded ones marked; projection diagnostics; `reduceEngineState` issues for that session; the tool catalog as sent to the provider; the last provider request body with headers stripped server-side; and copy-as-JSON for a bug report.
 
+The last provider request body is **not yet available** from the server. The body is built inside the chat-completions adapter; the server's provider port only sees normalized history and tools. An exact diagnostic would require an additive observer in the exported adapter options, and therefore the full contract-altering gate. Rebuilding the JSON in the server would be an inaccurate, drifting duplicate; global `fetch` interception could expose authorization headers. Open Question 4 asks whether to do the full gate for this developer-only view or defer it. Any eventual route must require both conversation and session ids, validate their relationship, and return body only, never headers.
+
 ### D23 — `Host` and `Origin` validation plus a per-process token, required
 
 Every request: reject unless `Host` is the loopback address or `localhost` with the configured port. Every state-changing request (`POST`, `PATCH`, `DELETE`): reject unless `Origin` equals the server's own origin. Every `/commands` and `/api/*` request: reject unless it carries `X-Turnturn-Token` matching a 256-bit token generated at startup. No `Access-Control-Allow-Origin` header, ever.
@@ -340,7 +344,7 @@ Codex does the same thing for the same reason — `ThreadItem.first_user_message
 
 ### D25 — Two new contract surfaces, named as such
 
-This change creates an on-disk storage layout and a client-facing HTTP API. Neither existed, so neither is *altered* and the standard gate applies. Both are contracts the moment they ship: the layout because a user's conversations live in it, the API because a separately deployed client would pin it.
+This change creates an on-disk storage layout and a client-facing HTTP API. Neither existed, so neither is *altered* and the standard gate applies. Both are contracts the moment they ship: the layout because a user's conversations live in it, the API because a separately deployed client would pin it. An exact provider-request observer would instead alter the exported adapter options and trigger the full gate; it remains an open decision.
 
 So: `storageVersion` in `meta.json` from day one, with an ordered migration mechanism and a refusal to open a newer version (D26); and the recorded position, carried forward from harness Amendment D, that **the first separately deployed client is the trigger to version the client-facing protocol separately** — codex's `app-server-protocol/src/protocol/v1.rs`, `v2/`, and `schema_fixtures.rs` are what that looks like. Until then `/api` reuses internal types and `SCHEMA_VERSION` alone.
 
@@ -620,7 +624,7 @@ GET /api/workspaces/:workspaceKey/file?path=src/a.ts&start=1&end=200
 GET /api/debug/state?conversationId=&sessionId=
 → 200 { engineStateIssues, providerHistoryIssues, lastSequence }                  (D22)
 
-GET /api/debug/provider-request?sessionId=
+GET /api/debug/provider-request?conversationId=&sessionId=
 → 200 { body }                       # headers stripped server-side               (D23)
 
 POST /commands                       CommandEnvelope
@@ -810,5 +814,7 @@ Convention: `node --test` on `.mjs` against built `dist` for `packages/*`. `apps
 2. **Is the per-process token acceptable ergonomically?** It is required by D23's reasoning, and the cost is that `vite dev` needs `VITE_TURNTURN_TOKEN` from the CLI banner and that `curl`-ing the server by hand needs a header. If that friction is unwelcome the alternative is `Host`/`Origin` only, which leaves a local-process path to `shell` open — a real reduction in safety, not a preference. Default if unanswered: keep the token.
 
 3. **Spec sync ordering**, as set out in the Migration Plan. This needs an answer before either change is archived, not before implementation starts.
+
+4. **Is the exact provider-request diagnostic worth a public adapter API addition?** The normal chat UI does not need it, but it is useful when verifying the history and tools actually sent to LiteLLM or Ollama. A normalized `ProviderPort` request is not the wire JSON, and duplicating the adapter's request builder in the server would drift. An optional body-only observer on the exported adapter options is the smallest exact seam, but requires the full contract-altering design ritual and your review. Default if unanswered: do not add the hook or pretend an approximate body is exact; leave task 3.7 open and proceed only after deciding whether to defer this developer-only view.
 
 Deliberately *not* left open, because each would change the specs or the task breakdown and is decided above: storage engine (D1), where `conversation.created` lives (D2), engine granularity (D3), who owns durable identity (D6), whether `POST /commands` awaits a turn (D7), Markdown renderer (D17), and whether to virtualize (D20).

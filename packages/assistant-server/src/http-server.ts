@@ -57,7 +57,6 @@ async function handleRequest(
   }
 
   if (method === "GET" && url.pathname === "/events") {
-    let snapshot: ConversationSnapshot | undefined;
     const persistent = options.persistent;
     if (persistent !== undefined) {
       let conversationId: ConversationId;
@@ -72,19 +71,30 @@ async function handleRequest(
         writeJson(res, 404, { error: { code: "CONVERSATION_NOT_FOUND" } });
         return;
       }
-      snapshot = {
+      const sessions = await Promise.all(
+        conversation.sessions.map(async (session) => ({
+          sessionId: session.sessionId,
+          runtime: await persistent.sessions.open(conversationId, session.sessionId),
+        })),
+      );
+      openEvents(res);
+      const cleanup = options.runtime.live.subscribeConversation(
+        res,
         conversationId,
-        serverInstanceId: persistent.serverInstanceId,
-        sessions: await Promise.all(
-          conversation.sessions.map(async (session) => {
-            const opened = await persistent.sessions.open(conversationId, session.sessionId);
-            return { sessionId: session.sessionId, lastSequence: opened.durable.records().at(-1)?.sequence ?? 0 };
-          }),
-        ),
-      };
+        (): ConversationSnapshot => ({
+          conversationId,
+          serverInstanceId: persistent.serverInstanceId,
+          sessions: sessions.map(({ sessionId, runtime }) => ({
+            sessionId,
+            lastSequence: runtime.durable.records().at(-1)?.sequence ?? 0,
+          })),
+        }),
+      );
+      req.on("close", cleanup);
+      return;
     }
     openEvents(res);
-    const cleanup = options.runtime.live.subscribe(res, snapshot);
+    const cleanup = options.runtime.live.subscribe(res);
     req.on("close", cleanup);
     return;
   }
