@@ -1,3 +1,5 @@
+export type { HttpChatTransportOptions } from "./http-transport.js";
+export { HttpChatTransport, TransportHttpError } from "./http-transport.js";
 export { projectConversation, projectSession } from "./projector.js";
 export type { SessionSlice } from "./reconcile.js";
 export type { ResumeController } from "./resume.js";
