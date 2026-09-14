@@ -63,6 +63,45 @@ Rejected for v1:
 
 - Ink/terminal rendering. The target reusable client surface is browser React, not terminal React.
 
+## Added 2026-09-12: Codex `app-server`, the closest analog
+
+The section above cites a codex conformance test script. The more relevant codex reference was missed: `app-server` is six crates whose whole job is exposing the engine to clients over a transport — exactly this change's problem.
+
+| Crate | Non-test lines |
+| --- | --- |
+| `app-server` | 55,293 |
+| `app-server-protocol` | 34,309 |
+| `app-server-transport` | 16,799 |
+| `app-server-daemon` | 6,512 |
+| `app-server-test-client` | 4,082 |
+| `app-server-client` | 3,277 |
+
+Not a volume model — but three structural decisions are worth knowing.
+
+**It is JSON-RPC 2.0, not REST.** `app-server-protocol/src/rpc.rs` defines `JSONRPCMessage` as `Request | Notification | Response | Error`. Commands are requests with ids; server-to-client events are **notifications**, which carry no id and expect no reply. That is the same asymmetry as our commands-versus-events split, expressed in one envelope instead of three endpoints.
+
+**One protocol, four transports.** `app-server-transport/src/transport/` contains `stdio.rs`, `unix_socket.rs`, `websocket.rs`, and `remote_control/`. The protocol is transport-agnostic and the transport is swappable. That is precisely the property this change wants for later Electron reuse, and it argues for keeping transport concerns in one module rather than spread through route handlers.
+
+**The client-facing protocol is versioned separately from the internal one.** `app-server-protocol/src/protocol/v1.rs` and `protocol/v2/`, plus `schema_fixtures.rs` to catch breaking changes. Codex deliberately did not publish its internal types to clients.
+
+## Added 2026-09-12: the transport choice is genuinely contested
+
+The section above says Claude Code chose WebSocket and implies turnturn is the simpler case. The actual split across all three references:
+
+| Reference | Client transport | Evidence |
+| --- | --- | --- |
+| codex | JSON-RPC over stdio / unix socket / WebSocket / remote-control. **No SSE.** | `app-server-transport/src/transport/` |
+| claude-code | WebSocket | `src/server/directConnectManager.ts:41-56` |
+| gemini-cli | **HTTP + SSE** | `packages/a2a-server/src/http/app.ts:162` sets `text/event-stream` |
+
+Two of three chose bidirectional sockets. So "SSE because we do not need bidirectional" is a weaker argument than it reads — but the conclusion still holds, for a turnturn-specific reason the draft did not give:
+
+**SSE's native `id:` field and `Last-Event-ID` reconnect header implement resume-by-cursor at the protocol level**, which is the exact semantic Decision 7 and B15 already committed to. No other transport gives that for free.
+
+**And that is also a trap — see Amendment A in `design.md`.** The cursor SSE offers is for the *live* stream, which is deliberately lossy. Using it would promise replay on a channel that drops deltas by design.
+
+One more from claude-code worth carrying: `src/server/web/scrollback-buffer.ts` is a **100 KiB circular buffer** for replaying the lossy channel to a reconnecting client. It is the concrete precedent for B14's bounded live-event queue, and it shows the pragmatic answer to "what if the client is gone a long time" is a cap plus accepted loss.
+
 ## Design conclusion
 
 Build a local HTTP server with:

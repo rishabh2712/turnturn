@@ -117,6 +117,38 @@ Exit criteria:
 
 The OpenAI adapter is v1 scope but not necessarily Milestone 3 scope: it lands against the conformance suite either as Milestone 3 close-out or in Milestone 8 with its auth surface.
 
+## Milestone 3.5: Coding Chat Workspace
+
+Status: design written 2026-09-12, awaiting review. Risk retired: is the engine usable as a product, or only observable?
+
+Inserted rather than appended, on the information-gain rule. Milestone 3 produced an engine and an observability console for it. Milestones 4 through 6 all spend that engine through a human surface — approvals a person has to read, compaction they have to trust, diffs they have to review — and each is easier to design against a real client than to guess at. Building the approval UI in Milestone 4 without a client means building it twice.
+
+Goal: turn the web harness into a coding chat workspace with durable conversations.
+
+OpenSpec change:
+
+- `implement-coding-chat-workspace`
+
+Exit criteria:
+
+- Durable per-session record logs, one per session, sequences gapless within each. Conversations survive process restart with both `reduceEngineState` and `reduceProviderHistory` reporting no issues.
+- The forked provider-history reducer deleted, its trigger condition met.
+- Conversation listing, creation, rename, archive, and deletion, listed from an index without reading record bodies.
+- Session-scoped record retrieval and conversation-filtered live events. No endpoint and no event stream spans conversations.
+- Durable identity assigned by the server. The browser stops minting conversation and session ids.
+- Interrupted turns finalized durably on next open, exactly once.
+- A conversation projector as a tested component, not a renderer helper: user messages, assistant responses, tool activity grouped per provider step, approvals, recoverable errors, and turn phase.
+- Application shell — sidebar, header, transcript, composer — with the selected conversation restored across a reload.
+- Markdown, syntax-highlighted code with copy, tables, lists, and clickable workspace file references, with no model-supplied HTML, script, or image reaching the DOM.
+- Streaming without duplicated text after live-to-durable reconciliation, proven by a disconnect-and-reconnect comparison against a client that never disconnected.
+- Inline approvals, stop, retry, and continue. Scroll position held when the reader scrolls away from a streaming turn.
+- Debug surfaces behind an explicit developer mode that can read client state and not write it.
+- `Host` and `Origin` validation plus a per-process token on state-changing requests, because `shell` is reachable and unsandboxed until Milestone 4.
+- The client reaches the engine only through a transport interface, and imports no `assistant-core` runtime module.
+- One real LiteLLM tool-using conversation completed end to end in the product UI, surviving a server restart.
+
+Deferred to v1.x by this milestone, named so they stop competing: queued turns, per-tool cancel, in-app model and workspace switching, multi-workspace, conversation search, attachments, transcript virtualization, and Electron packaging. Electron is a constraint on this milestone's seams, not a deliverable.
+
 ## Milestone 4: Trust Loop
 
 Risk retired: can the user let it run without supervising every call?
