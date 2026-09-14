@@ -8,7 +8,6 @@ coverage
 .env
 .env.local
 *.log
-__pycache__/
-*.pyc
+.claude/
 __pycache__/
 *.pyc
