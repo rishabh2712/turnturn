@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApprovalDecisions, LiveEventTypes as Live } from "@turnturn/protocol";
+import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { projectConversation } from "../dist/projector.js";
 import { ingestRecord } from "../dist/reconcile.js";
 import { Durable, sessionFixture } from "./fixtures.mjs";
@@ -308,4 +309,34 @@ test("turn phase follows provider, streaming, approval, and tool states", async 
     { turnId: f.turnId, toolCallId, approvalId },
   );
   assert.equal(phase(), "executing-tools");
+});
+
+test("a tool request with no result renders as requested or running, never terminal", async (t) => {
+  const f = await sessionFixture(t);
+  const toolCallId = f.toolCallId();
+  await f.startTurn();
+  await f.startStep();
+  await f.add(Durable.ProviderStepCompleted, { stopReason: "tool-use" }, { turnId: f.turnId, stepId: f.stepId });
+  await f.add(
+    Durable.ToolRequested,
+    { name: "shell", input: { command: "sleep 1" }, providerOrder: 0, requiresApproval: false },
+    { turnId: f.turnId, stepId: f.stepId, toolCallId },
+  );
+  const call = items(projectConversation(f.conversationId, [f.slice()]), "tool-activity")[0].calls[0];
+  assert.equal(call.status, "requested");
+
+  const started = f.event(Live.ToolStarted, {}, { turnId: f.turnId, toolCallId });
+  const runningCall = items(projectConversation(f.conversationId, [f.slice({ live: [started] })]), "tool-activity")[0]
+    .calls[0];
+  assert.equal(runningCall.status, "running");
+});
+
+test("D2: reducing two session logs jointly reports issues, so it must never be done", async (t) => {
+  const a = await sessionFixture(t);
+  const b = await sessionFixture(t);
+  await a.startTurn("A");
+  await b.startTurn("B");
+  const joint = reduceEngineState([...a.records, ...b.records]);
+  assert.ok(joint.issues.length > 0);
+  assert.ok(joint.issues.some((issue) => issue.code === "out_of_order"));
 });
