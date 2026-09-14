@@ -72,6 +72,16 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  packages/chat-client:
+    dependencies:
+      '@turnturn/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/protocol:
     dependencies:
       zod:

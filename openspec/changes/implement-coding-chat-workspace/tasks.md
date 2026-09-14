@@ -22,7 +22,7 @@ Copied from `packages/protocol` and `implement-sequential-agent-loop/tasks.md`. 
 
 ## Design Gate
 
-- [ ] Design review by the user. `design.md` is written and validates; Open Questions 1–4 want answers. Implementation starts at stage 1 only after this is checked.
+- [x] Design review by the user. Rishabh asked to start after the defaults were proposed: keep the global `/records` route removed, keep the local token, decide spec archive order later, and defer exact provider-request diagnostics.
 
 ## Implementation Tasks
 
@@ -75,7 +75,7 @@ Depends on: stage 2.
 - [x] 3.4 Implement `GET /api/conversations/:cid/sessions/:sid/records` and **remove `GET /records`** (D9, S5). Verify contiguous ascending records above `afterSequence`, and `404 SESSION_NOT_IN_CONVERSATION` for a session that belongs to another conversation. Resolve Open Question 1 before doing the removal.
 - [x] 3.5 Add a conversation filter to `LiveBroadcaster` (D8, S7) and require `?conversationId` on `/events`. Extend the snapshot frame to `{ conversationId, serverInstanceId, sessions: [{ sessionId, lastSequence }] }`. Verify that a subscriber for A receives none of B's events, that the frame carries a cursor per session, and — keeping the existing assertions — that no `id:` field is ever emitted and a non-reading subscriber cannot stall a turn.
 - [x] 3.6 Make `POST /commands` return `202 { kind:"accepted", turnId }` for `turn.submit` without awaiting the turn, holding the promise in a per-session in-flight map for duplicate-submit reuse and graceful shutdown (D7). Keep `turn.cancel` awaited. Verify that the POST resolves while the turn is still running and that the turn still reaches a terminal record. Existing `api-conversations.test.mjs` proves acceptance before completion, duplicate reuse, and later terminal replay.
-- [ ] 3.7 Implement `GET /api/runtime` with `baseUrlHost` instead of `baseUrl` (S8), `GET /api/workspaces/:key/file` confined through `WorkspacePathGuard` with text-only and size caps (D19), and `/api/debug/*` scoped to one session with provider request headers stripped (D22). Verify path-escape, non-text, and oversized refusals, and assert no endpoint's response body contains the configured API key. Runtime, file-peek, and session-scoped debug-state routes pass tests. Exact provider-request capture remains unimplemented because it would add a public adapter option; resolve design Open Question 4 before doing that or explicitly defer this developer-only view.
+- [x] 3.7 Implement `GET /api/runtime` with `baseUrlHost` instead of `baseUrl` (S8), `GET /api/workspaces/:key/file` confined through `WorkspacePathGuard` with text-only and size caps (D19), and session-scoped `/api/debug/state` (D22). Tests cover path escape, non-text and oversized refusals, and absence of the configured API key in responses. Exact provider-request inspection is deferred by resolved Open Question 4; no approximate endpoint is exposed.
 - [x] 3.8 Verification task: the Amendment B resume race, per session. Open `/events`, append records concurrently from two sessions, run the snapshot-then-replay algorithm, and assert **every record is observed exactly once** — no gap, no duplicate. `events-resume.test.mjs` also forces a publish while the snapshot cursor is collected; that test failed before registration was moved ahead of cursor collection.
 
 Acceptance: no endpoint returns records spanning conversations; no live event crosses conversations; unauthenticated and cross-origin requests are refused; the resume race test passes under concurrent appends.
@@ -88,8 +88,8 @@ Files: new `packages/chat-client/` with `package.json`, `tsconfig.json`, `src/{i
 
 Depends on: stage 3 (for the transport implementation; the projector itself depends only on stage 1).
 
-- [ ] 4.1 Scaffold `packages/chat-client` to protocol conventions, depending only on `@turnturn/protocol`. Verify `pnpm --filter @turnturn/chat-client build` emits `dist` and that a test asserts the built output references no `node:` builtin and no `assistant-core` module (D13).
-- [ ] 4.2 Define `view-model.ts` from `design.md` "Conversation projection" — the six item kinds, `ToolCallView`, `ToolCallDetail`, `ConversationView`, `TurnPhase`. Verify with a type-test that the item union is exhaustive, so adding a kind is a compile error.
+- [x] 4.1 Scaffold `packages/chat-client` to protocol conventions, depending only on `@turnturn/protocol`. `browser-boundary.test.mjs` verifies that `dist` contains the entry point and declarations, and that its built output references neither `node:` builtins nor `assistant-core` (D13).
+- [x] 4.2 Define `view-model.ts` from `design.md` "Conversation projection" — the six item kinds, `ToolCallView`, `ToolCallDetail`, `ConversationView`, `TurnPhase`. `view-model.type-tests.ts` switches over all six kinds and fails typechecking if a new kind is added without handling it.
 - [ ] 4.3 Write the projector tests before the projector. One test per invariant in `design.md` "Projector invariants worth testing": session isolation, conversation isolation, no duplicate assistant text, multi-step ordering, exactly-one-terminal-per-request, wave grouping by `stepId`, approval lifecycle, approval-after-cancellation, no turn resurrection, sequence gap, redelivery idempotence, order stability, optimistic supersession, cancellation metadata, `synthetic` distinction, phase derivation. Build the fixtures as real record arrays so they stay honest.
 - [ ] 4.4 Implement `reconcile.ts` — the supersession table and the two retention rules from `design.md` "Durable ↔ live reconciliation", including the `live-text-unbacked` diagnostic. Verify the table row by row and verify that dropping unbacked non-empty text raises the diagnostic rather than silently losing words.
 - [ ] 4.5 Implement `projector.ts`: per-session projection, concatenation by session ordinal, stable keys, total order key. Verify all of 4.3 passes, and add the D2 guard — reducing two session logs jointly reports issues, so the never-cross-sessions constraint is executable.
@@ -186,7 +186,7 @@ Depends on: stages 5 and 9.
 
 - [ ] 10.1 Build the drawer with the contents listed in D22, reading through read-only selectors only. Verify it shows the selected session's records and no other session's.
 - [ ] 10.2 Enforce the boundary: verify with a test that no module under `components/developer/` imports a store mutator, and that toggling developer mode leaves the transcript, turn state, and conversation list unchanged (law 8).
-- [ ] 10.3 Add the redacted provider-request view and copy-as-JSON bug bundle. Verify the response carries no headers and that neither the view nor the bundle contains the configured API key.
+- [ ] 10.3 Add the copy-as-JSON bug bundle from available read-only state. Verify the bundle contains no configured API key. Exact provider-request inspection is deferred beyond this milestone.
 
 Acceptance: every diagnostic the harness showed by default is reachable on demand; none of it can drive the application.
 

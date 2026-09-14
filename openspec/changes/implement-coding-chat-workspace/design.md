@@ -2,9 +2,9 @@
 
 Milestone 3.5. Motivation is in `proposal.md`; requirements are in `specs/`; scope and exit criteria are in `ROADMAP.md`. This file holds decisions.
 
-Status: **awaiting review.** Per `openspec/project.md`, implementation does not start until Rishabh has reviewed this document. Four questions in "Open Questions" want an answer; question 4 determines whether exact provider-request diagnostics enter this milestone.
+Status: **reviewed for implementation on 2026-09-14.** Rishabh asked to start after the proposed defaults were stated. Questions 1 and 2 take their defaults; question 3 remains an archive-time choice; question 4 defers exact provider-request diagnostics from this milestone.
 
-**Gate tier: standard, pending Open Question 4.** The implemented change does not alter a public package API. An exact provider-request diagnostic would need an observer in the exported adapter options, which would change this to the full gate; it is not implemented while that choice is unreviewed. See Decisions 22 and 25.
+**Gate tier: standard.** This milestone does not alter a public package API. An exact provider-request diagnostic would need an observer in the exported adapter options, which would change to the full gate; it is deferred. See Decisions 22 and 25.
 
 ---
 
@@ -320,9 +320,9 @@ The developer drawer is off by default, enabled by `?dev=1`, a keyboard chord, o
 
 Law 8 says debug state must not become the application state source. The way that law gets broken is not by a decision; it is by a debug panel acquiring a "reset" button because it was convenient. Making the drawer structurally incapable of dispatching is cheaper than reviewing for it, and T11 asserts no module under `developer/` imports a mutator.
 
-Contents: connection state and `serverInstanceId`; the selected session's durable records; a bounded ring of the last 200 live events with superseded ones marked; projection diagnostics; `reduceEngineState` issues for that session; the tool catalog as sent to the provider; the last provider request body with headers stripped server-side; and copy-as-JSON for a bug report.
+Contents: connection state and `serverInstanceId`; the selected session's durable records; a bounded ring of the last 200 live events with superseded ones marked; projection diagnostics; `reduceEngineState` issues for that session; the tool catalog as sent to the provider; and copy-as-JSON for a bug report. Exact provider-request body inspection is deferred.
 
-The last provider request body is **not yet available** from the server. The body is built inside the chat-completions adapter; the server's provider port only sees normalized history and tools. An exact diagnostic would require an additive observer in the exported adapter options, and therefore the full contract-altering gate. Rebuilding the JSON in the server would be an inaccurate, drifting duplicate; global `fetch` interception could expose authorization headers. Open Question 4 asks whether to do the full gate for this developer-only view or defer it. Any eventual route must require both conversation and session ids, validate their relationship, and return body only, never headers.
+The last provider request body is **not available** from the server. The body is built inside the chat-completions adapter; the server's provider port only sees normalized history and tools. An exact diagnostic would require an additive observer in the exported adapter options, and therefore the full contract-altering gate. Rebuilding the JSON in the server would be an inaccurate, drifting duplicate; global `fetch` interception could expose authorization headers. This developer-only view is deferred. Any eventual route must require both conversation and session ids, validate their relationship, and return body only, never headers.
 
 ### D23 — `Host` and `Origin` validation plus a per-process token, required
 
@@ -624,8 +624,7 @@ GET /api/workspaces/:workspaceKey/file?path=src/a.ts&start=1&end=200
 GET /api/debug/state?conversationId=&sessionId=
 → 200 { engineStateIssues, providerHistoryIssues, lastSequence }                  (D22)
 
-GET /api/debug/provider-request?conversationId=&sessionId=
-→ 200 { body }                       # headers stripped server-side               (D23)
+// Exact provider-request inspection is deferred; no route is exposed in this milestone.
 
 POST /commands                       CommandEnvelope
 → 202 { kind: "accepted", turnId }              for turn.submit                   (D7)
@@ -815,6 +814,6 @@ Convention: `node --test` on `.mjs` against built `dist` for `packages/*`. `apps
 
 3. **Spec sync ordering**, as set out in the Migration Plan. This needs an answer before either change is archived, not before implementation starts.
 
-4. **Is the exact provider-request diagnostic worth a public adapter API addition?** The normal chat UI does not need it, but it is useful when verifying the history and tools actually sent to LiteLLM or Ollama. A normalized `ProviderPort` request is not the wire JSON, and duplicating the adapter's request builder in the server would drift. An optional body-only observer on the exported adapter options is the smallest exact seam, but requires the full contract-altering design ritual and your review. Default if unanswered: do not add the hook or pretend an approximate body is exact; leave task 3.7 open and proceed only after deciding whether to defer this developer-only view.
+4. **Resolved for this milestone: defer exact provider-request diagnostics.** The normal chat UI does not need the wire JSON, and duplicating the adapter's request builder in the server would drift. A future optional body-only observer on exported adapter options requires the full contract-altering design ritual. No approximate request body is labeled exact and no provider-request endpoint ships now.
 
 Deliberately *not* left open, because each would change the specs or the task breakdown and is decided above: storage engine (D1), where `conversation.created` lives (D2), engine granularity (D3), who owns durable identity (D6), whether `POST /commands` awaits a turn (D7), Markdown renderer (D17), and whether to virtualize (D20).
