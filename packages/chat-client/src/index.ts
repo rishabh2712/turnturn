@@ -1,3 +1,5 @@
+export { projectConversation, projectSession } from "./projector.js";
+export type { SessionSlice } from "./reconcile.js";
 export type {
   ApprovalRequestItem,
   ApprovalView,
