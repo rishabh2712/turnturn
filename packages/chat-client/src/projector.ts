@@ -11,6 +11,7 @@ import {
 } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { reconcileLive, type SessionSlice } from "./reconcile.js";
+import { summarizeGroup, toolDetail, toolHeadline } from "./tool-summary.js";
 import type {
   ApprovalRequestItem,
   ApprovalView,
@@ -249,7 +250,6 @@ export function projectSession(original: SessionSlice): SessionProjection {
       ),
     }));
     const calls = pairs.map((pair) => pair.call);
-    const [firstCall] = calls;
     const item: ToolActivityGroupItem = {
       kind: "tool-activity",
       key: `t:${stepId}`,
@@ -257,7 +257,7 @@ export function projectSession(original: SessionSlice): SessionProjection {
       order: [slice.ordinal, Math.min(...requests.map((request) => request.sequence)), 0],
       turnId: firstRequest.turnId,
       stepId,
-      summary: calls.length === 1 && firstCall !== undefined ? firstCall.headline : `${calls.length} tool calls`,
+      summary: summarizeGroup(calls),
       status: groupStatus(calls),
       calls,
     };
@@ -354,8 +354,8 @@ function toolCallView(
     name: request.payload.name,
     input: request.payload.input,
     status,
-    headline: request.payload.name,
-    detail: { presentation: "json", value: output === undefined ? request.payload.input : output },
+    headline: toolHeadline(request.payload.name, request.payload.input, output),
+    detail: toolDetail(request.payload.name, request.payload.input, output),
     requiresApproval: request.payload.requiresApproval,
     ...(approvalView === undefined ? {} : { approval: approvalView }),
     ...(error === undefined ? {} : { error }),
