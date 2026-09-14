@@ -101,6 +101,19 @@ export class ConversationStore {
     this.notify();
   }
 
+  /** The highest durable sequence already ingested for a session, or 0 if it's unknown. Resume uses this to ask for `afterSequence=N`. */
+  lastSequenceFor(sessionId: SessionId): number {
+    return this.slices.get(sessionId)?.lastSequence ?? 0;
+  }
+
+  /** Drops a session's live (not-yet-superseded) events, keeping its durable records. Used on a server restart (D8): live state may reference work the restart interrupted, so it's discarded rather than trusted. */
+  clearLive(sessionId: SessionId): void {
+    const current = this.slices.get(sessionId);
+    if (current === undefined || current.live.length === 0) return;
+    this.slices.set(sessionId, { ...current, live: [] });
+    this.markViewDirty();
+  }
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
