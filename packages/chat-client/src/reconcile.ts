@@ -63,14 +63,124 @@ export function ingestLive(slice: SessionSlice, event: LiveEvent): SessionSlice 
   return reconcileLive({ ...slice, live: [...slice.live, event] });
 }
 
+interface DurableFacts {
+  readonly messages: ReadonlySet<string>;
+  readonly terminalTools: ReadonlySet<string>;
+  readonly requestedApprovals: ReadonlySet<string>;
+  readonly resolvedApprovals: ReadonlySet<string>;
+  readonly startedTurns: ReadonlySet<string>;
+  readonly terminalTurns: ReadonlySet<string>;
+}
+
+/**
+ * One row per live event type: what durable fact makes it redundant. A live event is
+ * dropped once the durable record it was standing in for has arrived; `onDrop` lets a
+ * rule raise a diagnostic instead of silently discarding real content.
+ */
+interface SupersessionRule {
+  readonly name: string;
+  readonly types: readonly Live[];
+  readonly isSuperseded: (event: LiveEvent, facts: DurableFacts) => boolean;
+  readonly onDrop?: (event: LiveEvent, facts: DurableFacts) => ProjectionIssue | undefined;
+}
+
+const SUPERSESSION_RULES: readonly SupersessionRule[] = [
+  {
+    name: "assistant-text-superseded-by-durable-message",
+    types: [Live.ContentDelta, Live.ReasoningDelta],
+    isSuperseded: (event, facts) =>
+      (event.stepId !== undefined && facts.messages.has(event.stepId)) ||
+      (event.turnId !== undefined && facts.terminalTurns.has(event.turnId)),
+    onDrop: (event, facts) =>
+      event.type === Live.ContentDelta &&
+      event.turnId !== undefined &&
+      facts.terminalTurns.has(event.turnId) &&
+      event.payload.text.length > 0
+        ? {
+            code: "live-text-unbacked",
+            message: "Live assistant text has no durable message before the turn ended",
+            turnId: event.turnId,
+          }
+        : undefined,
+  },
+  {
+    name: "tool-activity-superseded-by-terminal-result",
+    types: [
+      Live.ToolStarted,
+      Live.ToolProgress,
+      Live.StdoutDelta,
+      Live.StderrDelta,
+      Live.ToolCompleted,
+      Live.ToolFailed,
+    ],
+    isSuperseded: (event, facts) => event.toolCallId !== undefined && facts.terminalTools.has(event.toolCallId),
+  },
+  {
+    name: "approval-request-superseded-by-durable-request",
+    types: [Live.ApprovalRequested],
+    isSuperseded: (event, facts) => event.approvalId !== undefined && facts.requestedApprovals.has(event.approvalId),
+  },
+  {
+    name: "approval-resolution-superseded-by-durable-resolution",
+    types: [Live.ApprovalResolved],
+    isSuperseded: (event, facts) => event.approvalId !== undefined && facts.resolvedApprovals.has(event.approvalId),
+  },
+  {
+    name: "turn-start-superseded-by-durable-start",
+    types: [Live.TurnStarted],
+    isSuperseded: (event, facts) => event.turnId !== undefined && facts.startedTurns.has(event.turnId),
+  },
+  {
+    name: "turn-terminal-superseded-by-durable-terminal",
+    types: [Live.TurnCompleted, Live.TurnFailed, Live.TurnAborted],
+    isSuperseded: (event, facts) => event.turnId !== undefined && facts.terminalTurns.has(event.turnId),
+  },
+];
+
+const RULE_BY_TYPE = new Map<Live, SupersessionRule>(
+  SUPERSESSION_RULES.flatMap((rule) => rule.types.map((type) => [type, rule] as const)),
+);
+
 export function reconcileLive(slice: SessionSlice): SessionSlice {
+  const facts = collectDurableFacts(slice.records);
+
+  const issues: ProjectionIssue[] = [...slice.diagnostics];
+  const retained: LiveEvent[] = [];
+  for (const event of slice.live) {
+    if (event.sessionId !== slice.sessionId || event.conversationId !== slice.conversationId) {
+      issues.push({
+        code: "foreign-live-event",
+        message: "Live event does not belong to this session",
+        sessionId: slice.sessionId,
+      });
+      continue;
+    }
+    const rule = RULE_BY_TYPE.get(event.type);
+    if (rule?.isSuperseded(event, facts)) {
+      const issue = rule.onDrop?.(event, facts);
+      if (issue !== undefined) issues.push({ ...issue, sessionId: slice.sessionId });
+      continue;
+    }
+    retained.push(event);
+  }
+
+  let warningCount = 0;
+  const bounded = retained.filter((event) => {
+    if (event.type !== Live.Warning) return true;
+    warningCount += 1;
+    return warningCount > retained.filter((candidate) => candidate.type === Live.Warning).length - 50;
+  });
+  return { ...slice, live: bounded, diagnostics: issues };
+}
+
+function collectDurableFacts(records: readonly DurableRecord[]): DurableFacts {
   const messages = new Set<string>();
   const terminalTools = new Set<string>();
   const requestedApprovals = new Set<string>();
   const resolvedApprovals = new Set<string>();
   const startedTurns = new Set<string>();
   const terminalTurns = new Set<string>();
-  for (const record of slice.records) {
+  for (const record of records) {
     switch (record.type) {
       case Durable.AssistantMessageCompleted:
         if (record.stepId !== undefined) messages.add(record.stepId);
@@ -99,59 +209,7 @@ export function reconcileLive(slice: SessionSlice): SessionSlice {
         break;
     }
   }
-
-  const issues: ProjectionIssue[] = [...slice.diagnostics];
-  const retained: LiveEvent[] = [];
-  for (const event of slice.live) {
-    if (event.sessionId !== slice.sessionId || event.conversationId !== slice.conversationId) {
-      issues.push({
-        code: "foreign-live-event",
-        message: "Live event does not belong to this session",
-        sessionId: slice.sessionId,
-      });
-      continue;
-    }
-    if (event.type === Live.ContentDelta || event.type === Live.ReasoningDelta) {
-      if (event.stepId !== undefined && messages.has(event.stepId)) continue;
-      if (event.turnId !== undefined && terminalTurns.has(event.turnId)) {
-        if (event.type === Live.ContentDelta && event.payload.text.length > 0) {
-          issues.push({
-            code: "live-text-unbacked",
-            message: "Live assistant text has no durable message before the turn ended",
-            sessionId: slice.sessionId,
-            turnId: event.turnId,
-          });
-        }
-        continue;
-      }
-    } else if (
-      event.type === Live.ToolStarted ||
-      event.type === Live.ToolProgress ||
-      event.type === Live.StdoutDelta ||
-      event.type === Live.StderrDelta ||
-      event.type === Live.ToolCompleted ||
-      event.type === Live.ToolFailed
-    ) {
-      if (event.toolCallId !== undefined && terminalTools.has(event.toolCallId)) continue;
-    } else if (event.type === Live.ApprovalRequested) {
-      if (event.approvalId !== undefined && requestedApprovals.has(event.approvalId)) continue;
-    } else if (event.type === Live.ApprovalResolved) {
-      if (event.approvalId !== undefined && resolvedApprovals.has(event.approvalId)) continue;
-    } else if (event.type === Live.TurnStarted) {
-      if (event.turnId !== undefined && startedTurns.has(event.turnId)) continue;
-    } else if (event.type === Live.TurnCompleted || event.type === Live.TurnFailed || event.type === Live.TurnAborted) {
-      if (event.turnId !== undefined && terminalTurns.has(event.turnId)) continue;
-    }
-    retained.push(event);
-  }
-
-  let warningCount = 0;
-  const bounded = retained.filter((event) => {
-    if (event.type !== Live.Warning) return true;
-    warningCount += 1;
-    return warningCount > retained.filter((candidate) => candidate.type === Live.Warning).length - 50;
-  });
-  return { ...slice, live: bounded, diagnostics: issues };
+  return { messages, terminalTools, requestedApprovals, resolvedApprovals, startedTurns, terminalTurns };
 }
 
 function withIssue(slice: SessionSlice, code: string, message: string, record?: DurableRecord): SessionSlice {
