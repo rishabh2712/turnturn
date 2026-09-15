@@ -1,12 +1,15 @@
 import {
+  type ApprovalRequestItem,
   type ChatTransport,
   ConversationStore,
   type ConversationViewItem,
+  type ResumeController,
   resumeConversation,
 } from "@turnturn/chat-client";
-import type { ConversationId, TurnId } from "@turnturn/protocol";
+import type { ApprovalDecisions, ConversationId, TurnId } from "@turnturn/protocol";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { sendTurn } from "./client-actions";
+import { resolveApproval, sendTurn } from "./client-actions";
+import { ApprovalCard } from "./components/approval/ApprovalCard";
 import { ConversationSidebar } from "./components/shell/ConversationSidebar";
 import { ConversationListProvider, useConversationList } from "./providers/ConversationListProvider";
 import { RuntimeProvider, useRuntime } from "./providers/RuntimeProvider";
@@ -140,6 +143,7 @@ function ConversationPane(props: ConversationPaneProps) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [submittedTurnId, setSubmittedTurnId] = useState<TurnId | undefined>();
+  const resume = useRef<ResumeController | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -150,7 +154,8 @@ function ConversationPane(props: ConversationPaneProps) {
         for (const session of detail.sessions) {
           store.registerSession(session.sessionId, session.ordinal, session.provider, session.model);
         }
-        stop = resumeConversation(transport, store, conversationId).stop;
+        resume.current = resumeConversation(transport, store, conversationId);
+        stop = resume.current.stop;
         setLoading(false);
       },
       (cause: unknown) => {
@@ -162,6 +167,7 @@ function ConversationPane(props: ConversationPaneProps) {
     return () => {
       active = false;
       stop?.();
+      resume.current = undefined;
     };
   }, [transport, store, conversationId]);
 
@@ -187,6 +193,15 @@ function ConversationPane(props: ConversationPaneProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function answerApproval(
+    item: ApprovalRequestItem,
+    decision: ApprovalDecisions,
+  ): Promise<"accepted" | "cancelled"> {
+    const outcome = await resolveApproval(transport, conversationId, item, decision);
+    await resume.current?.refresh(item.sessionId);
+    return outcome;
   }
 
   const connected = snapshot.connection.status === "connected";
@@ -225,8 +240,14 @@ function ConversationPane(props: ConversationPaneProps) {
           </div>
         ) : null}
         {snapshot.view.items.map((item) => (
-          <TranscriptItem item={item} key={item.key} />
+          <TranscriptItem item={item} key={item.key} onResolveApproval={answerApproval} />
         ))}
+        {snapshot.view.activeTurn !== undefined || submittedTurnId !== undefined ? (
+          <output className="tt-live-phase">
+            <span className="tt-live-dot" aria-hidden="true" />
+            {phaseLabel(snapshot.view.activeTurn?.phase ?? "waiting-for-model")}
+          </output>
+        ) : null}
       </div>
       <Composer
         draft={draft}
@@ -245,7 +266,16 @@ function ConversationPane(props: ConversationPaneProps) {
   );
 }
 
-function TranscriptItem({ item }: { readonly item: ConversationViewItem }) {
+function TranscriptItem({
+  item,
+  onResolveApproval,
+}: {
+  readonly item: ConversationViewItem;
+  readonly onResolveApproval: (
+    item: ApprovalRequestItem,
+    decision: ApprovalDecisions,
+  ) => Promise<"accepted" | "cancelled">;
+}) {
   switch (item.kind) {
     case "user-message":
       return (
@@ -274,12 +304,16 @@ function TranscriptItem({ item }: { readonly item: ConversationViewItem }) {
                 {call.name} · {call.status}
               </strong>
               <pre>{JSON.stringify(call.detail, null, 2)}</pre>
+              {call.progress.map((message, index) => (
+                <div key={`${call.toolCallId}:progress:${index}`}>{message}</div>
+              ))}
+              {call.streamedOutput !== undefined ? <pre>{call.streamedOutput}</pre> : null}
             </div>
           ))}
         </details>
       );
     case "approval-request":
-      return <div className="tt-status-line">Approval needed: {item.reason}</div>;
+      return <ApprovalCard item={item} onResolve={(decision) => onResolveApproval(item, decision)} />;
     case "turn-status":
       return item.status === "completed" ? null : (
         <div className="tt-status-line">
@@ -288,6 +322,23 @@ function TranscriptItem({ item }: { readonly item: ConversationViewItem }) {
       );
     case "session-boundary":
       return <div className="tt-status-line">{item.message}</div>;
+  }
+}
+
+function phaseLabel(phase: string): string {
+  switch (phase) {
+    case "waiting-for-model":
+      return "Waiting for model…";
+    case "generating":
+      return "Writing response…";
+    case "executing-tools":
+      return "Using tools…";
+    case "awaiting-approval":
+      return "Waiting for your approval…";
+    case "finishing":
+      return "Finishing…";
+    default:
+      return phase;
   }
 }
 

@@ -30,7 +30,9 @@ export function createFakeTransport(conversationId, options = {}) {
       const all = recordsBySession.get(sessionId) ?? [];
       const eligible = all.filter((record) => record.sequence > afterSequence);
       const page = eligible.slice(0, pageLimit);
-      const lastSequence = page.length > 0 ? page[page.length - 1].sequence : afterSequence;
+      const lastSequence = options.reportFullTail
+        ? (all.at(-1)?.sequence ?? 0)
+        : (page.at(-1)?.sequence ?? afterSequence);
       const hasMore = eligible.length > page.length;
       return { sessionId, records: page, lastSequence, hasMore };
     },

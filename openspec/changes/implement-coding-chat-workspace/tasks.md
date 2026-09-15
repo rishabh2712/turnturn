@@ -43,6 +43,13 @@ Dogfood checkpoint, 2026-09-14:
 - Tool definitions are sent by the engine, and the shell has a collapsed tool-activity view, but no real model-driven tool round trip has been observed in this UI. The approval request is text-only—Allow/Deny is not wired—and successful `turn.completed` is currently hidden. D4 remains open; avoid shell/write/edit dogfooding until approval controls land.
 - The `resumeConversation` snapshot/live ordering mismatch and the real reconnect test remain open under 4.8. Do not count the fake-transport test as the browser proof.
 
+UI recovery checkpoint, 2026-09-14:
+
+- Live lifecycle events now trigger a durable catch-up: `turn.started`, tool start/terminal, approval request/resolution, and turn terminal. Live text still renders immediately. Events arriving during initial snapshot replay are buffered until catch-up completes. The records cursor uses the last fetched record, not the server's full-log `lastSequence`, so paged replay does not skip records. Unit tests reproduce all three previous failures.
+- The inline approval card shows literal tool input (and shell command/working directory), offers Allow and Deny, prevents a second click while resolving, and submits `approval.resolve` with the exact durable scope. A component test simulates a full UI reload from a pending edit record and verifies Deny dispatch. Late `APPROVAL_NOT_PENDING` maps to cancelled and triggers a refetch.
+- The running LiteLLM page loaded the rebuilt UI and the earlier pending turn appeared as `Turn aborted: SERVER_RESTARTED`. The server was already down when work began, so that old approval cannot be resumed. A new real-model tool approval and terminal live transition have **not** been visually exercised; D3/D4 remain open. The full real reconnect race proof under 4.8 is still deferred.
+- A subsequent real browser turn through the configured LiteLLM model showed the submitted user message and `Waiting for model…`, then the assistant reply, and the same reply after a page reload. This verifies the terminal UI transition and durable recovery. The greeting finished too quickly to observe an intermediate text delta, and no new real approval was generated, so the remaining D3/D4 checks are still open.
+
 ### 1. T0 — Correctness prerequisites
 
 Five defects in `assistant-core`, each blocking a client-side correctness property, plus the repo hygiene that makes the rest of the work measurable. Doing these first is not tidiness: S12 makes the T13 acceptance proof impossible, and S10 makes "no duplicate assistant text" unprovable.
@@ -190,8 +197,8 @@ Files: new `apps/web/src/components/approval/*`, `apps/web/src/components/status
 
 Depends on: stages 7 and 8.
 
-- [ ] 9.1 Build the inline approval card at the transcript position where the approval was requested (D16). Verify the shell command renders verbatim as literal text and unparsed, the working directory is shown, and both Allow and Deny are offered.
-- [ ] 9.2 Implement resolution: submit `approval.resolve`, disable both choices while in flight, and make a second submission impossible. Verify the dispatched command's decision and scope, and that the card shows `Resolving…`.
+- [x] 9.1 Build the inline approval card at the transcript position where the approval was requested (D16). Verify the shell command renders verbatim as literal text and unparsed, the working directory is shown, and both Allow and Deny are offered.
+- [x] 9.2 Implement resolution: submit `approval.resolve`, disable both choices while in flight, and make a second submission impossible. Verify the dispatched command's decision and scope, and that the card shows `Resolving…`.
 - [ ] 9.3 Implement the cancelled path: a turn cancelled before the user answers shows the approval as cancelled with the turn still terminal, and a late resolve refused with `APPROVAL_NOT_PENDING` renders as that same cancelled state rather than an error (C6). Verify both.
 - [ ] 9.4 Build the off-screen approval banner. Verify it appears only when a pending approval is outside the viewport and that activating it moves the viewport to the card.
 - [ ] 9.5 Implement the error and recovery table from `design.md` "Error and recovery behaviour". Verify one test per row, including a rejected command resyncing from the server rather than leaving stale local state.

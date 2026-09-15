@@ -1,5 +1,6 @@
-import type { ChatTransport, ConversationStore } from "@turnturn/chat-client";
+import type { ApprovalRequestItem, ChatTransport, ConversationStore } from "@turnturn/chat-client";
 import {
+  type ApprovalDecisions,
   CommandTypes,
   type ConversationId,
   formatCommandId,
@@ -40,4 +41,32 @@ export async function sendTurn(
     store.clearOptimistic(session.sessionId);
     throw error;
   }
+}
+
+/** Resolves only the approval identified by the projected durable request. */
+export async function resolveApproval(
+  transport: ChatTransport,
+  conversationId: ConversationId,
+  approval: ApprovalRequestItem,
+  decision: ApprovalDecisions,
+): Promise<"accepted" | "cancelled"> {
+  const commandId = formatCommandId(crypto.randomUUID());
+  const result = await transport.submitCommand({
+    schemaVersion: SCHEMA_VERSION,
+    commandId,
+    idempotencyKey: commandId,
+    type: CommandTypes.ApprovalResolve,
+    createdAt: new Date().toISOString(),
+    conversationId,
+    sessionId: approval.sessionId,
+    turnId: approval.turnId,
+    toolCallId: approval.toolCallId,
+    approvalId: approval.approvalId,
+    payload: { decision },
+  });
+  if (result.kind === "rejected") {
+    if (result.code === "APPROVAL_NOT_PENDING") return "cancelled";
+    throw new Error(`${result.code}: ${result.message}`);
+  }
+  return "accepted";
 }

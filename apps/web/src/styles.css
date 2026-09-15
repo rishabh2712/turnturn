@@ -180,6 +180,72 @@ summary:focus-visible {
   color: #777770;
   font-size: 12px;
 }
+.tt-live-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #777770;
+  font-size: 12px;
+}
+.tt-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7b77ce;
+  animation: tt-blink 1s ease-in-out infinite alternate;
+}
+.tt-approval-card {
+  width: min(100%, 650px);
+  border: 1px solid #e7cf9d;
+  border-radius: 12px;
+  padding: 16px;
+  background: #fffaf0;
+  color: #3c3427;
+  font-size: 13px;
+}
+.tt-approval-heading {
+  font-weight: 650;
+}
+.tt-approval-card p {
+  margin: 8px 0;
+}
+.tt-approval-command {
+  margin: 12px 0 8px;
+  padding: 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #f5f0e7;
+  color: #282723;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.tt-approval-cwd {
+  color: #736d62;
+  font-size: 11px;
+}
+.tt-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.tt-approval-actions button {
+  border: 1px solid #d8d2c5;
+  border-radius: 8px;
+  padding: 7px 14px;
+  background: #fff;
+  cursor: pointer;
+}
+.tt-approval-actions button:last-child {
+  border-color: #252522;
+  background: #252522;
+  color: #fff;
+}
+.tt-approval-actions button:focus-visible {
+  outline: 2px solid #667ee5;
+  outline-offset: 2px;
+}
 .tt-muted {
   color: #999991;
   font-size: 13px;

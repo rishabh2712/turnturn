@@ -150,6 +150,79 @@ test("live events are forwarded to the store as they arrive", async (t) => {
   controller.stop();
 });
 
+test("a live approval announcement fetches its durable request so the card is actionable", async (t) => {
+  const f = await sessionFixture(t);
+  await f.startTurn();
+  await f.startStep();
+  const transport = createFakeTransport(f.conversationId);
+  transport.seedRecords(f.sessionId, f.records);
+  const store = new ConversationStore(f.conversationId);
+  const controller = resumeConversation(transport, store, f.conversationId);
+  transport.emitSnapshot([{ sessionId: f.sessionId, lastSequence: f.records.at(-1).sequence }]);
+  await flush();
+
+  await f.add(Durable.ProviderStepCompleted, { stopReason: "tool-use" }, { turnId: f.turnId, stepId: f.stepId });
+  const toolCallId = f.toolCallId();
+  const approvalId = f.approvalId();
+  await f.add(
+    Durable.ToolRequested,
+    { name: "edit", input: { path: "a.ts", oldText: "x", newText: "y" }, providerOrder: 0, requiresApproval: true },
+    { turnId: f.turnId, stepId: f.stepId, toolCallId },
+  );
+  await f.add(Durable.ApprovalRequested, { reason: "Edit a.ts" }, { turnId: f.turnId, toolCallId, approvalId });
+  transport.seedRecords(f.sessionId, f.records.slice(-3));
+  transport.emitEvent(
+    f.event(Live.ApprovalRequested, { reason: "Edit a.ts" }, { turnId: f.turnId, toolCallId, approvalId }),
+  );
+  await flush();
+
+  assert.equal(store.getSnapshot().view.pendingApproval?.approvalId, approvalId);
+  assert.equal(store.getSnapshot().view.activeTurn?.phase, "awaiting-approval");
+  controller.stop();
+});
+
+test("a live terminal announcement fetches the saved assistant reply and unblocks the turn", async (t) => {
+  const f = await sessionFixture(t);
+  await f.startTurn();
+  await f.startStep();
+  const transport = createFakeTransport(f.conversationId);
+  transport.seedRecords(f.sessionId, f.records);
+  const store = new ConversationStore(f.conversationId);
+  const controller = resumeConversation(transport, store, f.conversationId);
+  transport.emitSnapshot([{ sessionId: f.sessionId, lastSequence: f.records.at(-1).sequence }]);
+  await flush();
+
+  await f.add(Durable.AssistantMessageCompleted, { content: "Done" }, { turnId: f.turnId, stepId: f.stepId });
+  await f.add(Durable.ProviderStepCompleted, { stopReason: "complete" }, { turnId: f.turnId, stepId: f.stepId });
+  await f.add(Durable.TurnCompleted, { stopReason: "complete" }, { turnId: f.turnId });
+  transport.seedRecords(f.sessionId, f.records.slice(-3));
+  transport.emitEvent(f.event(Live.TurnCompleted, { stopReason: "complete" }, { turnId: f.turnId }));
+  await flush();
+
+  assert.deepEqual(
+    items(store.getSnapshot().view, "assistant-message").map((item) => item.text),
+    ["Done"],
+  );
+  assert.equal(store.getSnapshot().view.activeTurn, undefined);
+  assert.equal(items(store.getSnapshot().view, "turn-status")[0]?.status, "completed");
+  controller.stop();
+});
+
+test("catch-up uses the last fetched record as cursor when server lastSequence is the full log tail", async (t) => {
+  const f = await sessionFixture(t);
+  await f.startTurn();
+  await f.startStep();
+  const transport = createFakeTransport(f.conversationId, { pageLimit: 2, reportFullTail: true });
+  transport.seedRecords(f.sessionId, f.records);
+  const store = new ConversationStore(f.conversationId);
+  const controller = resumeConversation(transport, store, f.conversationId);
+  transport.emitSnapshot([{ sessionId: f.sessionId, lastSequence: f.records.at(-1).sequence }]);
+  await flush();
+  assert.equal(store.lastSequenceFor(f.sessionId), f.records.at(-1).sequence);
+  assert.deepEqual(store.getSnapshot().view.diagnostics, []);
+  controller.stop();
+});
+
 test("a live event with no sessionId is dropped rather than crashing", async (t) => {
   const f = await sessionFixture(t);
   const transport = createFakeTransport(f.conversationId);
