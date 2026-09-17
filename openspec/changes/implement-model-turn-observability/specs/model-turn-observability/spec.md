@@ -40,9 +40,23 @@ Turnturn SHALL represent every concrete upstream provider request as a distinct 
 - **THEN** the attempt SHALL retain its first terminal outcome
 - **AND** the duplicate terminal observation SHALL be reported as a trace issue
 
-### Requirement: Semantic context and provider wire request are both inspectable
+### Requirement: Model context and provider wire request are both inspectable
 
-For each provider attempt, Turnturn SHALL preserve the provider-neutral semantic input and the exact serialized provider request body as separate evidence.
+Turnturn SHALL model context as immutable, identified contributions independent of observability. For each provider attempt, Turnturn SHALL preserve the provider-neutral model-context snapshot and the exact serialized provider request body as separate evidence.
+
+#### Scenario: Context is selected for one provider step
+
+- **GIVEN** context contributions available during a turn
+- **WHEN** a provider step is prepared
+- **THEN** the snapshot SHALL identify each included contribution and its order
+- **AND** exclusion or unavailability SHALL be represented separately with a reason
+- **AND** another step MAY make a different selection without mutating the earlier snapshot
+
+#### Scenario: An extension contributes a new context kind
+
+- **WHEN** a context producer uses a kind not built into `assistant-core`
+- **THEN** the contribution SHALL remain representable without changing the core context type
+- **AND** its source, lifetime, content, and provenance SHALL remain inspectable
 
 #### Scenario: Tools are offered to a model
 
@@ -108,7 +122,7 @@ Turnturn SHALL distinguish runtime production of tool output from inclusion of t
 
 ### Requirement: Context usage is explained semantically
 
-Turnturn SHALL project context into non-overlapping named contributions and distinguish estimated category usage from authoritative provider usage.
+Turnturn SHALL project context into non-overlapping named contributions and per-step selections, and distinguish estimated contribution usage from authoritative provider usage.
 
 #### Scenario: A completed attempt reports usage
 

@@ -13,6 +13,7 @@ import {
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { ProviderHistoryItemTypes, reduceProviderHistory } from "@turnturn/protocol/provider-history";
 import { createAssistantEngine } from "../dist/engine.js";
+import { noopObservation } from "../dist/observability/index.js";
 import {
   completed,
   FixedClock,
@@ -47,7 +48,7 @@ function command(type, payload, scope = {}, n = 1, idempotencyKey) {
   };
 }
 
-async function seededEngine({ provider, policy = new StaticPolicy(), tools, scope = {} } = {}) {
+async function seededEngine({ provider, policy = new StaticPolicy(), tools, scope = {}, observation } = {}) {
   const durable = new MemoryDurableSink();
   const live = new MemoryLiveSink();
   const engine = createAssistantEngine({
@@ -58,12 +59,69 @@ async function seededEngine({ provider, policy = new StaticPolicy(), tools, scop
     live,
     ids: new SequentialIds(),
     clock: new FixedClock(),
+    ...(observation === undefined ? {} : { observation }),
   });
 
   await engine.submit(command(CommandTypes.ConversationCreate, { title: "Demo" }, scope, 1));
   await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, scope, 2));
   return { engine, durable, live };
 }
+
+test("disabled observation leaves durable records and live events byte-for-byte unchanged", async () => {
+  const unobserved = await seededEngine();
+  const disabled = await seededEngine({ observation: noopObservation });
+  const submit = command(CommandTypes.TurnSubmit, { input: "same input" }, { turnId: ids.turnId }, 70);
+
+  const unobservedOutcome = await unobserved.engine.submit(submit);
+  const disabledOutcome = await disabled.engine.submit(submit);
+
+  assert.equal(JSON.stringify(disabledOutcome), JSON.stringify(unobservedOutcome));
+  assert.equal(JSON.stringify(disabled.durable.records()), JSON.stringify(unobserved.durable.records()));
+  assert.equal(JSON.stringify(disabled.live.events), JSON.stringify(unobserved.live.events));
+  assert.equal(JSON.stringify(disabled.engine.state()), JSON.stringify(unobserved.engine.state()));
+  assert.deepEqual(reduceEngineState(disabled.durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(disabled.durable.records()).issues, []);
+});
+
+test("throwing observation cannot prevent a durable terminal turn record", async () => {
+  const observation = {
+    startTurn() {
+      return {
+        startStep() {
+          throw new Error("observer failed");
+        },
+        observeTool() {
+          throw new Error("observer failed");
+        },
+        observeApproval() {
+          throw new Error("observer failed");
+        },
+        complete() {
+          throw new Error("observer failed");
+        },
+        fail() {
+          throw new Error("observer failed");
+        },
+        cancel() {
+          throw new Error("observer failed");
+        },
+      };
+    },
+    degraded() {
+      throw new Error("observer degradation reporter failed");
+    },
+  };
+  const { engine, durable } = await seededEngine({ observation });
+
+  const outcome = await engine.submit(
+    command(CommandTypes.TurnSubmit, { input: "finish despite tracing" }, { turnId: ids.turnId }, 71),
+  );
+
+  assert.equal(outcome.kind, "accepted");
+  assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnCompleted);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
 
 test("turn happy path persists the exact durable record type sequence", async () => {
   const provider = new ScriptedProvider([

@@ -13,9 +13,17 @@
       "types": "./dist/approval-registry.d.ts",
       "import": "./dist/approval-registry.js"
     },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "import": "./dist/context/index.js"
+    },
     "./ports": {
       "types": "./dist/ports.d.ts",
       "import": "./dist/ports.js"
+    },
+    "./observability": {
+      "types": "./dist/observability/index.d.ts",
+      "import": "./dist/observability/index.js"
     },
     "./provider-step-runner": {
       "types": "./dist/provider-step-runner.d.ts",

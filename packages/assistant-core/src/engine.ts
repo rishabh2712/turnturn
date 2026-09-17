@@ -1,6 +1,8 @@
 import { type CommandEnvelope, CommandTypes } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { ApprovalRegistry } from "./approval-registry.js";
+import { createSafeObservationPort } from "./observability/context.js";
+import { noopObservation, type ObservationPort } from "./observability/types.js";
 import type {
   AssistantEngine,
   CommandOutcome,
@@ -24,6 +26,7 @@ export interface AssistantEngineOptions {
   readonly live: LiveSink;
   readonly ids: EngineIds;
   readonly clock: EngineClock;
+  readonly observation?: ObservationPort;
 }
 
 type AcceptedOutcome = Extract<CommandOutcome, { readonly kind: "accepted" }>;
@@ -43,6 +46,7 @@ class DefaultAssistantEngine implements AssistantEngine {
 
   constructor(private readonly options: AssistantEngineOptions) {
     this.records = new RecordEmitter(options);
+    const observation = createSafeObservationPort(options.observation ?? noopObservation);
     this.turns = new TurnRunner({
       approvals: this.approvals,
       ids: options.ids,
@@ -50,6 +54,7 @@ class DefaultAssistantEngine implements AssistantEngine {
       provider: options.provider,
       records: this.records,
       tools: options.tools,
+      observation,
     });
   }
 

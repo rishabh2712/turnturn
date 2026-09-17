@@ -25,13 +25,16 @@ Do not implement until `design.md` is reviewed. Work in order. Begin each behavi
 
 ## 1. Observation vocabulary and non-interference
 
-- [ ] Add typed turn, step, provider-attempt, tool, and approval observations plus a no-op implementation under `assistant-core/src/observability/`.
-- [ ] Add a terminal guard to each attempt handle so complete/fail/cancel can be recorded at most once.
-- [ ] Test that disabled observation changes none of the existing engine outputs.
-- [ ] Test that an observer throwing from every method cannot prevent a durable terminal turn record.
-- [ ] Keep the public facade narrow; do not export trace storage or UI projection from `assistant-core`.
+- [x] Add typed turn, step, provider-attempt, tool, and approval observations plus a no-op implementation under `assistant-core/src/observability/`.
+- [x] Add the first-class context vocabulary under `assistant-core/src/context/`: immutable identified contributions, extensible built-in kinds, explicit lifetime/source/provenance, catalog snapshots, and per-step included/excluded/unavailable selections.
+- [x] Make observability consume `ModelContextSnapshot` from the context facade; it must not own context types or become the future context manager.
+- [x] Test custom contribution kinds, step-specific selection, unavailable versus excluded context, and preserved derivation provenance.
+- [x] Add a terminal guard to each attempt handle so complete/fail/cancel can be recorded at most once.
+- [x] Test that disabled observation changes none of the existing engine outputs.
+- [x] Test that an observer throwing from every method cannot prevent a durable terminal turn record.
+- [x] Keep the public facade narrow; do not export trace storage or UI projection from `assistant-core`.
 
-Acceptance: the scripted-provider engine suite produces byte-for-byte-equivalent durable records with observation disabled, and deliberate trace failures do not fail a turn.
+Acceptance: the scripted-provider engine suite produces byte-for-byte-equivalent durable records with observation disabled, deliberate trace failures do not fail a turn, and context can evolve independently of provider and trace types.
 
 ## 2. Local trace bundle
 
@@ -46,7 +49,7 @@ Acceptance: replaying the same bundle produces deeply equal semantic state, and 
 ## 3. Provider-attempt capture
 
 - [ ] Start an attempt for each concrete HTTP try, including retries and fallback when implemented.
-- [ ] Capture the provider-neutral semantic context in `ProviderStepRunner` before provider translation.
+- [ ] Capture the provider-neutral `ModelContextSnapshot` in `ProviderStepRunner` before provider translation, including the current catalog and explicit selection for this step.
 - [ ] Capture the exact JSON body, method, route, provider, and model in chat-completions `request.ts` immediately before transport.
 - [ ] Capture response status, provider/upstream request ID when present, timing, normalized failure, usage, and terminal reason.
 - [ ] Test that the trace's wire body deep-equals the body seen by the injected HTTP client.
@@ -78,8 +81,9 @@ Acceptance: the trace states separately who requested a tool, what actually ran,
 ## 6. Context contribution projection
 
 - [ ] Project ordered model-visible messages with roles and provider history identity.
-- [ ] Project named contributions for system/developer instructions, history, tool definitions, tool interactions, workspace instructions, compaction, and memory.
-- [ ] Represent unsupported/unwired contributors explicitly as empty with a reason.
+- [ ] Project the first-class contribution catalog for system/developer instructions, history, tool definitions, tool interactions, workspace instructions, compaction, memory, and extension-defined kinds.
+- [ ] Project each step's contribution selection, distinguishing included, excluded, and unsupported/unwired contributions with reasons.
+- [ ] Preserve contribution source, lifetime, and derivation links so future compaction and memory remain explainable.
 - [ ] Add approximate token counts per contribution and label them estimates; keep provider usage as the authoritative total.
 - [ ] Verify contribution counts are additive and do not count tool calls in ordinary history twice.
 
@@ -109,7 +113,7 @@ Acceptance: the same trace bundle projects identically after reload, and trace e
 
 - [ ] Add an on-demand developer action to inspect a selected turn; do not put raw diagnostics in the default transcript.
 - [ ] Context view: ordered messages, named contribution cards, tool catalog, presence/empty states, and estimated/authoritative token distinction.
-- [ ] Request view: semantic snapshot and exact provider JSON with copy controls and attempt selector.
+- [ ] Request view: model-context snapshot and exact provider JSON with copy controls and attempt selector.
 - [ ] Response view: raw frames, normalized events, completion/failure, usage, timing, and truncation notice.
 - [ ] Tools view: validation, policy, approval, execution, result, and later model-visibility links.
 - [ ] Runtime view: correlation IDs, retries, durable-record links, reducer/trace issues, and timings.

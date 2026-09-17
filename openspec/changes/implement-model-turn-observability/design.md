@@ -24,7 +24,8 @@ Today those facts are spread across transient local variables in `provider-step-
 - **Turn:** one accepted `turn.submit` command through a terminal durable state.
 - **Step:** one engine model phase followed by zero or more tool calls.
 - **Attempt:** one concrete upstream provider request. Retry or fallback creates another attempt within the same step.
-- **Semantic context:** the provider-neutral history, tool definitions, and named context contributions that Turnturn intended to send.
+- **Context contribution:** one immutable, identified piece of context available to the engine, including its source, lifetime, token estimate, and derivation provenance.
+- **Model-context snapshot:** the provider-neutral history, tool definitions, contribution catalog, and explicit per-step selection that Turnturn intended to send.
 - **Wire request:** the exact JSON body passed to `fetch`, excluding transport credentials and other request headers.
 - **Raw response evidence:** ordered SSE frame data or equivalent provider chunks before translation.
 - **Normalized response:** ordered `ProviderEvent` values emitted by `ProviderPort`.
@@ -89,22 +90,32 @@ step_1
 
 This is required to diagnose retry and fallback behavior. A turn-level request capture would silently overwrite the failed attempt with the successful one.
 
-## Decision 4: Capture semantic context and wire request separately
+## Decision 4: Make context first-class; capture its selection and wire request separately
 
-Before entering the provider adapter, `ProviderStepRunner` records a semantic snapshot:
+Context is an engine concept, not an observability concept and not an ambient process singleton. `assistant-core` owns a provider-neutral vocabulary for immutable context contributions. A contribution has a stable ID, extensible kind, session/turn/step lifetime, source, content, optional token estimate, and optional derivation provenance. Built-in kinds are constants rather than a closed union so memory providers and extensions can add kinds without changing the core contract.
+
+The context assembler that will later own collection, compaction, and budgeting is intentionally deferred. Observability imports the shared vocabulary and records it; it does not become the context manager or the source of model input.
+
+For every provider step, `ProviderStepRunner` records an immutable model-context snapshot:
 
 ```ts
 {
   history: request.history,
   tools: request.tools,
-  contributions: [
-    { kind: "conversation-history", ... },
-    { kind: "tool-definitions", ... },
-    { kind: "workspace-instructions", ... },
-    { kind: "memory", ... }
+  catalog: {
+    contributions: [
+      { id: "history:step-1", kind: "conversation-history", scope: "step", ... },
+      { id: "tools:step-1", kind: "tool-definitions", scope: "step", ... }
+    ]
+  },
+  selections: [
+    { contributionId: "history:step-1", disposition: "included", order: 0 },
+    { kind: "memory", disposition: "unavailable", reason: "memory is not wired" }
   ]
 }
 ```
+
+Catalog membership and request selection are different facts. A contribution may exist but be excluded from a particular step; an unavailable category has no contribution to select. Included selections carry explicit order. Derived contributions point to their inputs, allowing a future compaction summary to explain which earlier contributions it abstracts.
 
 After `request.ts` translates that snapshot, the adapter records the exact body supplied to `fetch`:
 
@@ -118,7 +129,14 @@ After `request.ts` translates that snapshot, the adapter records the exact body 
 }
 ```
 
-Both are necessary. The semantic snapshot answers whether Turnturn selected a fact. The wire request answers whether provider translation preserved it.
+The three layers answer different questions:
+
+```text
+context catalog -> per-step model-context snapshot -> provider wire request
+what existed       what this step selected           what was serialized
+```
+
+All three are necessary. The catalog answers what context existed. The snapshot answers whether Turnturn selected a fact for this step. The wire request answers whether provider translation preserved it.
 
 “Exact request” means exact request body, URL route, HTTP method, provider name, and non-secret transport metadata. Authorization, cookies, API keys, OAuth credentials, and arbitrary configured headers are not model context and SHALL NOT enter the trace. This is exclusion at capture time, not post-capture scrubbing.
 
@@ -176,11 +194,15 @@ interface ObservationPort {
 }
 
 interface ProviderAttemptObservation {
-  semanticContext(value: JsonValue): void;
   wireRequest(value: JsonValue): void;
   rawResponseFrame(value: JsonValue): void;
   providerEvent(value: ProviderEvent): void;
   complete(outcome: ProviderAttemptOutcome): void;
+}
+
+interface StepObservation {
+  modelContext(value: ModelContextSnapshot): void;
+  startProviderAttempt(scope: ProviderAttemptScope): ProviderAttemptObservation;
 }
 ```
 
@@ -206,9 +228,9 @@ One trace covers one root turn and all its provider attempts/tools. The trace ma
 
 Trace capture is opt-in through server configuration and enabled for the local dogfood profile. Removing a trace directory is recoverable and does not change session state. Trace schema versions independently from the durable protocol schema.
 
-## Decision 9: Context is presented as contributions, not one JSON blob
+## Decision 9: Context is presented as an extensible catalog and per-step selection
 
-The reducer projects an ordered model-visible message list and a contribution summary:
+The reducer projects an ordered model-visible message list, the contribution catalog visible during the turn, and the exact selection for each provider step:
 
 | Contribution | Initial source |
 | --- | --- |
@@ -220,7 +242,9 @@ The reducer projects an ordered model-visible message list and a contribution su
 | Compaction | Future compaction records |
 | Memory | Future memory port |
 
-Every category reports presence, item count, approximate tokens when available, and provenance. An empty category is shown as empty rather than omitted, so “memory not implemented” is distinguishable from “memory existed but was not sent.” Provider usage remains authoritative for total billed/input tokens; category token counts are labelled estimates.
+Every contribution reports stable identity, source, lifetime, item count, approximate tokens when available, and derivation provenance. Selection reports `included`, `excluded`, or `unavailable`; the latter two require a reason. Therefore “memory not implemented,” “memory existed but was deliberately excluded,” and “memory was sent” remain distinguishable. Provider usage remains authoritative for total billed/input tokens; contribution token counts are labelled estimates.
+
+Gemini's context graph motivates immutable atomic contributions, stable IDs, and derivation links. Codex's thread/turn/step separation motivates explicit lifetimes and a frozen request-scoped snapshot. Turnturn adopts those boundaries without committing to Gemini's graph processor or Codex's prompt-fragment implementation.
 
 ## Decision 10: Read-only, scoped API; on-demand UI
 
@@ -272,6 +296,11 @@ Expected ownership, subject to validation during implementation:
 packages/assistant-core/src/observability/
   types.ts             # observation vocabulary and no-op implementation
   context.ts           # scoped turn/step/attempt handles
+
+packages/assistant-core/src/context/
+  types.ts             # contribution catalog and per-step model-context snapshot
+  kinds.ts             # built-in extensible contribution-kind constants
+  index.ts             # narrow public context facade
 
 packages/assistant-core/src/provider-step-runner.ts
 packages/assistant-core/src/tool-wave-runner.ts
