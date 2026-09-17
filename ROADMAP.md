@@ -128,6 +128,7 @@ Goal: turn the web harness into a coding chat workspace with durable conversatio
 OpenSpec change:
 
 - `implement-coding-chat-workspace`
+- `implement-model-turn-observability` — companion diagnostic trace and per-turn context inspector; design review is required before implementation.
 
 Exit criteria:
 
@@ -143,6 +144,7 @@ Exit criteria:
 - Streaming without duplicated text after live-to-durable reconciliation, proven by a disconnect-and-reconnect comparison against a client that never disconnected.
 - Inline approvals, stop, retry, and continue. Scroll position held when the reader scrolls away from a streaming turn.
 - Debug surfaces behind an explicit developer mode that can read client state and not write it.
+- Per-turn model diagnostics that distinguish semantic context, exact provider request, provider response translation, runtime tool output, and later model-visible consumption.
 - `Host` and `Origin` validation plus a per-process token on state-changing requests, because `shell` is reachable and unsandboxed until Milestone 4.
 - The client reaches the engine only through a transport interface, and imports no `assistant-core` runtime module.
 - One real LiteLLM tool-using conversation completed end to end in the product UI, surviving a server restart.
