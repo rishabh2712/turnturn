@@ -5,8 +5,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CommandTypes, formatCommandId, formatTurnId, SCHEMA_VERSION } from "@turnturn/protocol";
+import { CommandTypes, formatCommandId, formatStepId, formatTurnId, SCHEMA_VERSION } from "@turnturn/protocol";
 import { createAssistantHttpServer, createAssistantRuntime, createPersistentRuntime } from "../dist/index.js";
+import { TRACE_SCHEMA_VERSION, TraceBundleWriter, traceRootForSessionLog } from "../dist/observability/index.js";
 
 test("conversation API creates, lists, activates, renames, archives, and deletes across restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "turnturn-api-test-"));
@@ -172,6 +173,75 @@ test("runtime config omits credentials and file peek confines text and size", as
   }
 });
 
+test("trace API scopes bundles to their session, follows growth, and loads referenced payloads lazily", async () => {
+  const root = await mkdtemp(join(tmpdir(), "turnturn-api-trace-test-"));
+  const harness = await start(root);
+  try {
+    const created = await harness.json("/api/conversations", "POST", { workspaceKey: harness.workspaceKey });
+    const conversationId = created.body.conversation.conversationId;
+    const activated = await harness.json(`/api/conversations/${conversationId}/activate`, "POST");
+    const sessionId = activated.body.sessionId;
+    const turnId = formatTurnId(randomUUID());
+    const stepId = formatStepId(randomUUID());
+    const traceId = "trace_api_test";
+    const tracesRoot = traceRootForSessionLog(harness.persistent.store.sessionPath(conversationId, sessionId));
+    const writer = await TraceBundleWriter.create({
+      tracesRoot,
+      manifest: {
+        schemaVersion: TRACE_SCHEMA_VERSION,
+        traceId,
+        conversationId,
+        sessionId,
+        turnId,
+        capturedAt: "2026-09-19T00:00:00.000Z",
+        provider: "test-provider",
+        model: "test-model",
+      },
+      payloadId: () => "payload_request",
+    });
+    await writer.append({ type: "turn.started", scope: { conversationId, sessionId, turnId } });
+    await writer.append({ type: "step.started", scope: { conversationId, sessionId, turnId, stepId } });
+    await writer.append(
+      {
+        type: "step.model-context",
+        scope: { conversationId, sessionId, turnId, stepId },
+        data: { messages: [], contributions: [], selections: [], tools: [], estimatedTokens: 0 },
+      },
+      { history: [], tools: [] },
+    );
+
+    const base = `/api/conversations/${conversationId}/sessions/${sessionId}/traces`;
+    const listed = await harness.json(`${base}?turnId=${turnId}`);
+    assert.deepEqual(
+      listed.body.traces.map((trace) => trace.traceId),
+      [traceId],
+    );
+    const first = await harness.json(`${base}/${traceId}`);
+    assert.equal(first.body.lastTraceSequence, 3);
+    assert.equal(first.body.unchanged, false);
+    const unchanged = await harness.json(`${base}/${traceId}?afterTraceSequence=3`);
+    assert.deepEqual(unchanged.body, { traceId, lastTraceSequence: 3, unchanged: true });
+
+    await writer.append({ type: "turn.completed", scope: { conversationId, sessionId, turnId } });
+    const grown = await harness.json(`${base}/${traceId}?afterTraceSequence=3`);
+    assert.equal(grown.body.lastTraceSequence, 4);
+    assert.equal(grown.body.trace.turns[0].status, "completed");
+    const payload = await harness.json(`${base}/${traceId}/payloads/payload_request`);
+    assert.deepEqual(payload.body.value, { history: [], tools: [] });
+
+    const other = await harness.json("/api/conversations", "POST", { workspaceKey: harness.workspaceKey });
+    const otherId = other.body.conversation.conversationId;
+    const otherSession = await harness.json(`/api/conversations/${otherId}/activate`, "POST");
+    const crossed = await harness.json(
+      `/api/conversations/${otherId}/sessions/${otherSession.body.sessionId}/traces/${traceId}`,
+    );
+    assert.equal(crossed.status, 404);
+  } finally {
+    await harness.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function start(root, provider, config = {}) {
   const workspace = join(root, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -184,6 +254,7 @@ async function start(root, provider, config = {}) {
   const address = server.address();
   assert(address && typeof address === "object");
   return {
+    persistent,
     workspaceKey: persistent.state.workspaceKey,
     workspace,
     json: async (path, method = "GET", body) => {

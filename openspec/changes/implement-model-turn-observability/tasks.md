@@ -79,65 +79,65 @@ Acceptance: observation remains explicit at turn, step, attempt, and tool owners
 
 ## 5. Tool and approval provenance
 
-- [ ] Observe tool validation input/result, policy decision, any modified input, approval request/resolution, execution start, bounded live output, and terminal result.
-- [ ] Link provider tool-call output to the runtime `toolCallId` without replacing the provider's call ID.
-- [ ] During later request capture, link included history tool calls/results to their runtime observations.
-- [ ] Test that executing a tool does not by itself mark the output model-visible.
-- [ ] Test a two-step round trip where the second request includes the first step's tool result.
-- [ ] Test deny, abort, allow-modified, cancellation during execution, and late approval resolution.
+- [x] Observe tool validation input/result, policy decision, any modified input, approval request/resolution, execution start, bounded live output, and terminal result.
+- [x] Link provider tool-call output to the runtime `toolCallId` without replacing the provider's call ID.
+- [x] During later request capture, link included history tool calls/results to their runtime observations.
+- [x] Test that executing a tool does not by itself mark the output model-visible.
+- [x] Test a two-step round trip where the second request includes the first step's tool result.
+- [x] Test deny, abort, allow-modified, cancellation during execution, and late approval resolution.
 
 Acceptance: the trace states separately who requested a tool, what actually ran, what it returned, and which later provider attempt received that result.
 
 ## 6. Context contribution projection
 
-- [ ] Project ordered model-visible messages with roles and provider history identity.
-- [ ] Project the first-class contribution catalog for system/developer instructions, history, tool definitions, tool interactions, workspace instructions, compaction, memory, and extension-defined kinds.
-- [ ] Project each step's contribution selection, distinguishing included, excluded, and unsupported/unwired contributions with reasons.
-- [ ] Preserve contribution source, lifetime, and derivation links so future compaction and memory remain explainable.
-- [ ] Add approximate token counts per contribution and label them estimates; keep provider usage as the authoritative total.
-- [ ] Verify contribution counts are additive and do not count tool calls in ordinary history twice.
+- [x] Project ordered model-visible messages with roles and provider history identity.
+- [x] Project the first-class contribution catalog for system/developer instructions, history, tool definitions, tool interactions, workspace instructions, compaction, memory, and extension-defined kinds.
+- [x] Project each step's contribution selection, distinguishing included, excluded, and unsupported/unwired contributions with reasons.
+- [x] Preserve contribution source, lifetime, and derivation links so future compaction and memory remain explainable.
+- [x] Add approximate token counts per contribution and label them estimates; keep provider usage as the authoritative total.
+- [x] Verify contribution counts are additive and do not count tool calls in ordinary history twice.
 
 Acceptance: the reduced trace answers “what context did this attempt receive?” without opening raw JSON, while retaining a path to the exact body.
 
 ## 7. Read-only server API
 
-- [ ] Add session-scoped trace summary, reduced trace, and lazy payload endpoints from Decision 10.
-- [ ] Validate every ID and return not found for a trace outside the specified conversation/session.
-- [ ] Add pagination or `afterTraceSequence` for growing traces.
-- [ ] Ensure responses never contain Authorization, cookies, configured keys, or arbitrary configured headers.
-- [ ] Add server tests for two conversations with overlapping local trace sequences and for a trace growing while it is read.
+- [x] Add session-scoped trace summary, reduced trace, and lazy payload endpoints from Decision 10.
+- [x] Validate every ID and return not found for a trace outside the specified conversation/session.
+- [x] Add pagination or `afterTraceSequence` for growing traces.
+- [x] Ensure responses never contain Authorization, cookies, configured keys, or arbitrary configured headers.
+- [x] Add server tests for two conversations with overlapping local trace sequences and for a trace growing while it is read.
 
 Acceptance: the browser can retrieve one turn's trace without reading another session and without loading every raw payload eagerly.
 
 ## 8. Client transport and projector
 
-- [ ] Add browser-safe trace types and read methods to `chat-client`; do not expose server writer types.
-- [ ] Add a trace projector that builds the Context, Request, Response, Tools, and Runtime views.
-- [ ] Refetch incremental trace state on existing lifecycle events while the inspector is open.
-- [ ] Keep trace state outside the normal conversation projector so trace deletion or failure cannot change the transcript.
-- [ ] Test out-of-order HTTP completion, repeated payload retrieval, trace truncation, and a missing/deleted trace.
+- [x] Add browser-safe trace types and read methods to `chat-client`; do not expose server writer types.
+- [x] Add a trace projector that builds the Context, Request, Response, Tools, and Runtime views.
+- [x] Refetch incremental trace state on existing lifecycle events while the inspector is open.
+- [x] Keep trace state outside the normal conversation projector so trace deletion or failure cannot change the transcript.
+- [x] Test out-of-order HTTP completion, repeated payload retrieval, trace truncation, and a missing/deleted trace.
 
 Acceptance: the same trace bundle projects identically after reload, and trace errors remain confined to the inspector.
 
 ## 9. Per-turn inspector
 
-- [ ] Add an on-demand developer action to inspect a selected turn; do not put raw diagnostics in the default transcript.
-- [ ] Context view: ordered messages, named contribution cards, tool catalog, presence/empty states, and estimated/authoritative token distinction.
-- [ ] Request view: model-context snapshot and exact provider JSON with copy controls and attempt selector.
-- [ ] Response view: raw frames, normalized events, completion/failure, usage, timing, and truncation notice.
-- [ ] Tools view: validation, policy, approval, execution, result, and later model-visibility links.
-- [ ] Runtime view: correlation IDs, retries, durable-record links, reducer/trace issues, and timings.
-- [ ] Test the motivating case: tools appear in the exact request while assistant text claims that no tools are connected.
+- [x] Add an on-demand developer action to inspect a selected turn; do not put raw diagnostics in the default transcript.
+- [x] Context view: ordered messages, named contribution cards, tool catalog, presence/empty states, and estimated/authoritative token distinction.
+- [x] Request view: model-context snapshot and exact provider JSON with copy controls and attempt selector.
+- [x] Response view: raw frames, normalized events, completion/failure, usage, timing, and truncation notice.
+- [x] Tools view: validation, policy, approval, execution, result, and later model-visibility links.
+- [x] Runtime view: correlation IDs, retries, durable-record links, reducer/trace issues, and timings.
+- [x] Test the motivating case: tools appear in the exact request while assistant text claims that no tools are connected.
 
 Acceptance: an operator can explain one provider attempt without reading server files or the protocol timeline.
 
 ## 10. Dogfood and close-out
 
-- [ ] Run one LiteLLM conversation that uses at least one workspace tool and inspect both provider attempts.
+- [x] Run one LiteLLM conversation that uses at least one workspace tool and inspect both provider attempts.
 - [ ] Run the same scenario against local Ollama when available.
 - [ ] Verify a reload preserves the inspector and that deleting the trace leaves the chat intact.
-- [ ] Record the observed request/context/tool-result chain under this change's `research/` directory without credentials.
-- [ ] Run root lint, build, typecheck, tests, and the milestone gate.
+- [x] Record the observed request/context/tool-result chain under this change's `research/` directory without credentials.
+- [x] Run root lint, build, typecheck, tests, and the milestone gate.
 - [ ] Update the roadmap and the coding-chat developer-mode task with the final ownership boundary.
 
 Acceptance: the UI proves which tools and messages were sent, what the provider returned, what ran, and what the next request consumed.

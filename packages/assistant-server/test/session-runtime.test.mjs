@@ -214,6 +214,7 @@ test("a traced provider step preserves model context and every concrete attempt"
     const reduced = reduceTraceBundle(bundle);
 
     assert.deepEqual(bundle.issues, []);
+    assert.ok(bundle.envelopes.every((envelope) => !("payload" in envelope.scope) && !("commandId" in envelope.scope)));
     assert.deepEqual(
       reduced.attempts.map((attempt) => attempt.status),
       ["failed", "completed"],
@@ -229,7 +230,7 @@ test("a traced provider step preserves model context and every concrete attempt"
     );
     assert.deepEqual(
       context.catalog.contributions.map((contribution) => contribution.kind),
-      ["conversation-history", "tool-definitions"],
+      ["conversation-history", "tool-interactions", "tool-definitions"],
     );
 
     const requestEnvelopes = bundle.envelopes.filter((envelope) => envelope.type === "attempt.wire-request");

@@ -1,4 +1,5 @@
 import { type CommandEnvelope, type ConversationId, LiveEventTypes as Live, type SessionId } from "@turnturn/protocol";
+import type { TraceDetailResponse, TraceListResponse, TracePayloadResponse } from "./trace-types.js";
 import type {
   ActivateResult,
   ChatTransport,
@@ -95,6 +96,36 @@ export class HttpChatTransport implements ChatTransport {
   getWorkspaceFile(workspaceKey: string, path: string, start?: number, end?: number): Promise<WorkspaceFile> {
     const params = { path, ...(start === undefined ? {} : { start }), ...(end === undefined ? {} : { end }) };
     return this.request("GET", `/api/workspaces/${workspaceKey}/file?${query(params)}`);
+  }
+
+  listTraces(conversationId: ConversationId, sessionId: SessionId, turnId?: string): Promise<TraceListResponse> {
+    const suffix = turnId === undefined ? "" : `?${query({ turnId })}`;
+    return this.request("GET", `/api/conversations/${conversationId}/sessions/${sessionId}/traces${suffix}`);
+  }
+
+  getTrace(
+    conversationId: ConversationId,
+    sessionId: SessionId,
+    traceId: string,
+    afterTraceSequence?: number,
+  ): Promise<TraceDetailResponse> {
+    const suffix = afterTraceSequence === undefined ? "" : `?${query({ afterTraceSequence })}`;
+    return this.request(
+      "GET",
+      `/api/conversations/${conversationId}/sessions/${sessionId}/traces/${encodeURIComponent(traceId)}${suffix}`,
+    );
+  }
+
+  getTracePayload(
+    conversationId: ConversationId,
+    sessionId: SessionId,
+    traceId: string,
+    payloadId: string,
+  ): Promise<TracePayloadResponse> {
+    return this.request(
+      "GET",
+      `/api/conversations/${conversationId}/sessions/${sessionId}/traces/${encodeURIComponent(traceId)}/payloads/${encodeURIComponent(payloadId)}`,
+    );
   }
 
   subscribeEvents(conversationId: ConversationId, handlers: LiveSubscriptionHandlers): () => void {

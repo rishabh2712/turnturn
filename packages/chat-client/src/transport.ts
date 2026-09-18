@@ -1,4 +1,5 @@
 import type { CommandEnvelope, ConversationId, DurableRecord, LiveEvent, SessionId } from "@turnturn/protocol";
+import type { TraceDetailResponse, TraceListResponse, TracePayloadResponse } from "./trace-types.js";
 
 export interface WorkspaceSummary {
   readonly key: string;
@@ -136,6 +137,19 @@ export interface ChatTransport {
   ): Promise<RecordsPage>;
   submitCommand(command: CommandEnvelope): Promise<TransportCommandResult>;
   getWorkspaceFile(workspaceKey: string, path: string, start?: number, end?: number): Promise<WorkspaceFile>;
+  listTraces(conversationId: ConversationId, sessionId: SessionId, turnId?: string): Promise<TraceListResponse>;
+  getTrace(
+    conversationId: ConversationId,
+    sessionId: SessionId,
+    traceId: string,
+    afterTraceSequence?: number,
+  ): Promise<TraceDetailResponse>;
+  getTracePayload(
+    conversationId: ConversationId,
+    sessionId: SessionId,
+    traceId: string,
+    payloadId: string,
+  ): Promise<TracePayloadResponse>;
   /** Opens (or reuses) the live event stream for a conversation. Returns an unsubscribe function. */
   subscribeEvents(conversationId: ConversationId, handlers: LiveSubscriptionHandlers): () => void;
 }

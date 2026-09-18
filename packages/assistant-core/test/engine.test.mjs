@@ -12,6 +12,7 @@ import {
 } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { ProviderHistoryItemTypes, reduceProviderHistory } from "@turnturn/protocol/provider-history";
+import { projectModelContext } from "../dist/context/index.js";
 import { createAssistantEngine } from "../dist/engine.js";
 import { noopObservation } from "../dist/observability/index.js";
 import {
@@ -111,7 +112,16 @@ test("throwing observation cannot prevent a durable terminal turn record", async
       throw new Error("observer degradation reporter failed");
     },
   };
-  const { engine, durable } = await seededEngine({ observation });
+  const { engine, durable } = await seededEngine({
+    observation,
+    provider: new ScriptedProvider([
+      [
+        { type: "tool-call-complete", call: { callId: "observed-tool", name: "probe", input: { value: 1 } } },
+        { type: "completed", reason: "tool-use" },
+      ],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
 
   const outcome = await engine.submit(
     command(CommandTypes.TurnSubmit, { input: "finish despite tracing" }, { turnId: ids.turnId }, 71),
@@ -147,11 +157,11 @@ test("provider steps expose model context and preserve sibling provider attempts
   assert.equal(observed.contexts.length, 1);
   assert.deepEqual(
     observed.contexts[0].catalog.contributions.map((contribution) => contribution.kind),
-    ["conversation-history", "tool-definitions"],
+    ["conversation-history", "tool-interactions", "tool-definitions"],
   );
   assert.deepEqual(
     observed.contexts[0].selections.map((selection) => selection.disposition),
-    ["included", "included", "unavailable", "unavailable", "unavailable", "unavailable", "unavailable"],
+    ["included", "included", "included", "unavailable", "unavailable", "unavailable", "unavailable", "unavailable"],
   );
   assert.deepEqual(
     observed.attempts.map((attempt) => attempt.terminal),
@@ -234,8 +244,12 @@ function recordingObservation(observed) {
             },
           };
         },
-        observeTool() {},
-        observeApproval() {},
+        observeTool(event) {
+          observed.tools?.push(event);
+        },
+        observeApproval(event) {
+          observed.approvals?.push(event);
+        },
         complete() {},
         fail() {},
         cancel() {},
@@ -244,6 +258,87 @@ function recordingObservation(observed) {
     degraded() {},
   };
 }
+
+test("tool runtime observations preserve validation, policy, execution, output, result, and provider identity", async () => {
+  const observed = { contexts: [], attempts: [], stepTerminals: [], tools: [], approvals: [] };
+  const provider = new ScriptedProvider([
+    [
+      { type: "tool-call-complete", call: { callId: "provider-call-1", name: "probe", input: { value: "before" } } },
+      { type: "completed", reason: "tool-use" },
+    ],
+    [{ type: "completed", reason: "complete" }],
+  ]);
+  const tools = new MemoryToolExecutor((request) => {
+    request.callbacks.stdout("working");
+    request.callbacks.progress("halfway");
+    return completed({ value: request.input.value });
+  });
+  const { engine, durable } = await seededEngine({
+    provider,
+    tools,
+    policy: new StaticPolicy({ kind: "allow-modified", input: { value: "after" } }),
+    observation: recordingObservation(observed),
+  });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "run" }, { turnId: ids.turnId }, 73));
+
+  assert.deepEqual(
+    observed.tools.map((event) => event.type),
+    [
+      "validation-input",
+      "validation-result",
+      "policy-decision",
+      "validation-input",
+      "validation-result",
+      "execution-started",
+      "execution-output",
+      "execution-output",
+      "execution-finished",
+      "result-recorded",
+    ],
+  );
+  assert.deepEqual(
+    observed.tools.filter((event) => event.type === "validation-input").map((event) => event.phase),
+    ["provider", "policy-modified"],
+  );
+  assert.ok(observed.tools.every((event) => event.scope.providerToolCallId === "provider-call-1"));
+  assert.equal(new Set(observed.tools.map((event) => event.scope.toolCallId)).size, 1);
+  assert.deepEqual(observed.tools.at(-1).result, { status: "completed", output: { value: "after" } });
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
+
+test("context projection keeps ordered history identity and counts tool interactions separately", async () => {
+  const observed = { contexts: [], attempts: [], stepTerminals: [] };
+  const provider = new ScriptedProvider([
+    [
+      { type: "tool-call-complete", call: { callId: "provider-call-2", name: "probe", input: { value: 1 } } },
+      { type: "completed", reason: "tool-use" },
+    ],
+    [{ type: "completed", reason: "complete" }],
+  ]);
+  const { engine } = await seededEngine({ provider, observation: recordingObservation(observed) });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "inspect context" }, { turnId: ids.turnId }, 74));
+
+  const second = projectModelContext(observed.contexts[1]);
+  assert.deepEqual(
+    second.messages.map((message) => [message.role, message.historyType]),
+    [
+      ["user", "user.input"],
+      ["assistant", "tool.request"],
+      ["tool", "tool.result"],
+    ],
+  );
+  assert.ok(second.messages.every((message) => message.recordId && message.sequence > 0));
+  const history = second.contributions.find((contribution) => contribution.kind === "conversation-history");
+  const interactions = second.contributions.find((contribution) => contribution.kind === "tool-interactions");
+  assert.equal(history.itemCount, 1);
+  assert.equal(interactions.itemCount, 2);
+  assert.ok(history.estimatedTokens > 0);
+  assert.ok(interactions.estimatedTokens > 0);
+  assert.equal(second.selections.find((selection) => selection.kind === "memory").disposition, "unavailable");
+});
 
 test("assistant text and live deltas keep their provider step identity", async () => {
   const provider = new ScriptedProvider([
@@ -401,6 +496,7 @@ test("provider history is scoped to the current session", async () => {
 });
 
 test("policy deny and abort produce synthetic terminal tool records", async () => {
+  const deniedObserved = { contexts: [], attempts: [], stepTerminals: [], tools: [], approvals: [] };
   const provider = new ScriptedProvider([
     [
       { type: "tool-call-complete", call: { callId: "native", name: "write", input: { path: "a" } } },
@@ -411,14 +507,17 @@ test("policy deny and abort produce synthetic terminal tool records", async () =
   const denied = await seededEngine({
     provider,
     policy: new StaticPolicy({ kind: "deny", error: testError("DENIED") }),
+    observation: recordingObservation(deniedObserved),
   });
 
   await denied.engine.submit(command(CommandTypes.TurnSubmit, { input: "try" }, { turnId: ids.turnId }, 5));
   const deniedRecord = denied.durable.records().find((record) => record.type === DurableRecordTypes.ToolResultDenied);
   assert.equal(deniedRecord.payload.synthetic, true);
+  assert.equal(deniedObserved.tools.at(-1).result.status, "denied");
   assert.deepEqual(reduceEngineState(denied.durable.records()).issues, []);
   assertEveryRequestedToolTerminated(denied.durable.records());
 
+  const abortedObserved = { contexts: [], attempts: [], stepTerminals: [], tools: [], approvals: [] };
   const aborted = await seededEngine({
     provider: new ScriptedProvider([
       [
@@ -427,12 +526,14 @@ test("policy deny and abort produce synthetic terminal tool records", async () =
       ],
     ]),
     policy: new StaticPolicy({ kind: "abort", error: testError("ABORT") }),
+    observation: recordingObservation(abortedObserved),
   });
   await aborted.engine.submit(command(CommandTypes.TurnSubmit, { input: "try" }, { turnId: ids.turnId }, 6));
   const abortedRecord = aborted.durable
     .records()
     .find((record) => record.type === DurableRecordTypes.ToolResultAborted);
   assert.equal(abortedRecord.payload.synthetic, true);
+  assert.equal(abortedObserved.tools.at(-1).result.status, "aborted");
   assert.equal(aborted.durable.records().at(-1).type, DurableRecordTypes.TurnAborted);
   assert.deepEqual(reduceEngineState(aborted.durable.records()).issues, []);
   assertEveryRequestedToolTerminated(aborted.durable.records());
@@ -455,6 +556,7 @@ test("policy allow-modified records modified input and ask resolves through appr
   assert.deepEqual(reduceEngineState(modified.durable.records()).issues, []);
   assertEveryRequestedToolTerminated(modified.durable.records());
 
+  const approvalObserved = { contexts: [], attempts: [], stepTerminals: [], tools: [], approvals: [] };
   const asked = await seededEngine({
     provider: new ScriptedProvider([
       [
@@ -464,6 +566,7 @@ test("policy allow-modified records modified input and ask resolves through appr
       [{ type: "completed", reason: "complete" }],
     ]),
     policy: new StaticPolicy({ kind: "ask", reason: "run command" }),
+    observation: recordingObservation(approvalObserved),
   });
   const running = asked.engine.submit(command(CommandTypes.TurnSubmit, { input: "run" }, { turnId: ids.turnId }, 9));
   const approval = await waitForRecord(asked.durable, DurableRecordTypes.ApprovalRequested);
@@ -478,6 +581,11 @@ test("policy allow-modified records modified input and ask resolves through appr
   assert.equal(approvalOutcome.kind, "accepted");
   await running;
   assert.ok(asked.durable.records().some((record) => record.type === DurableRecordTypes.ApprovalResolved));
+  assert.deepEqual(
+    approvalObserved.approvals.map((event) => event.type),
+    ["requested", "resolved"],
+  );
+  assert.equal(approvalObserved.approvals[0].scope.approvalId, approvalObserved.approvals[1].scope.approvalId);
   assert.deepEqual(reduceEngineState(asked.durable.records()).issues, []);
   assertEveryRequestedToolTerminated(asked.durable.records());
 });
@@ -529,6 +637,7 @@ test("duplicate approval resolution is rejected without a second durable resolut
 });
 
 test("approval resolved after cancellation is rejected and does not resurrect the turn", async () => {
+  const approvalObserved = { contexts: [], attempts: [], stepTerminals: [], tools: [], approvals: [] };
   const asked = await seededEngine({
     provider: new ScriptedProvider([
       [
@@ -537,6 +646,7 @@ test("approval resolved after cancellation is rejected and does not resurrect th
       ],
     ]),
     policy: new StaticPolicy({ kind: "ask", reason: "run command" }),
+    observation: recordingObservation(approvalObserved),
   });
   const running = asked.engine.submit(command(CommandTypes.TurnSubmit, { input: "run" }, { turnId: ids.turnId }, 18));
   const approval = await waitForRecord(asked.durable, DurableRecordTypes.ApprovalRequested);
@@ -564,6 +674,10 @@ test("approval resolved after cancellation is rejected and does not resurrect th
   assert.equal(
     asked.durable.records().filter((record) => record.type === DurableRecordTypes.ApprovalResolved).length,
     0,
+  );
+  assert.deepEqual(
+    approvalObserved.approvals.map((event) => event.type),
+    ["requested", "cancelled"],
   );
   assert.deepEqual(reduceEngineState(asked.durable.records()).issues, []);
   assertEveryRequestedToolTerminated(asked.durable.records());
@@ -604,6 +718,7 @@ test("cancel during provider streaming waits for durable turn.aborted and ignore
 });
 
 test("cancel during tool execution records the finished outcome with cancellation metadata", async () => {
+  const observed = { contexts: [], attempts: [], stepTerminals: [], tools: [], approvals: [] };
   let toolStarted;
   const toolStartedPromise = new Promise((resolve) => {
     toolStarted = resolve;
@@ -619,7 +734,7 @@ test("cancel during tool execution records the finished outcome with cancellatio
     await new Promise((resolve) => request.signal.addEventListener("abort", resolve, { once: true }));
     return completed({ finishedAfterAbort: true });
   });
-  const { engine, durable } = await seededEngine({ provider, tools });
+  const { engine, durable } = await seededEngine({ provider, tools, observation: recordingObservation(observed) });
   const running = engine.submit(command(CommandTypes.TurnSubmit, { input: "run slow" }, { turnId: ids.turnId }, 27));
 
   await toolStartedPromise;
@@ -638,6 +753,7 @@ test("cancel during tool execution records the finished outcome with cancellatio
     false,
   );
   assert.equal(cancel.kind, "accepted");
+  assert.deepEqual(observed.tools.at(-1).cancellation, { requested: true, reason: "stop tool" });
   assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnAborted);
   assertEveryRequestedToolTerminated(durable.records());
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);

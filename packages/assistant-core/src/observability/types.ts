@@ -1,6 +1,7 @@
 import type {
   ApprovalDecisions,
   ApprovalId,
+  CancellationMetadata,
   ConversationId,
   JsonValue,
   SerializedError,
@@ -98,12 +99,14 @@ export type ToolObservation =
   | {
       readonly type: "validation-input";
       readonly scope: ToolObservationScope;
+      readonly phase: "provider" | "policy-modified";
       readonly name: string;
       readonly input: JsonValue;
     }
   | {
       readonly type: "validation-result";
       readonly scope: ToolObservationScope;
+      readonly phase: "provider" | "policy-modified";
       readonly result: ToolInputValidation;
     }
   | {
@@ -124,9 +127,22 @@ export type ToolObservation =
       readonly text: string;
     }
   | {
+      readonly type: "execution-output-truncated";
+      readonly scope: ToolObservationScope;
+      readonly boundBytes: number;
+    }
+  | {
       readonly type: "execution-finished";
       readonly scope: ToolObservationScope;
       readonly outcome: ToolOutcome;
+    }
+  | {
+      readonly type: "result-recorded";
+      readonly scope: ToolObservationScope;
+      readonly result:
+        | { readonly status: "completed"; readonly output: JsonValue }
+        | { readonly status: "failed" | "denied" | "aborted"; readonly error: SerializedError };
+      readonly cancellation?: CancellationMetadata;
     };
 
 export type ApprovalObservation =

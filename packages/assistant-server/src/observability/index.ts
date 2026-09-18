@@ -1,15 +1,24 @@
 export type { TraceObservationPortOptions } from "./trace-observation-port.js";
-export { DEFAULT_RAW_RESPONSE_MAX_BYTES, TraceObservationPort } from "./trace-observation-port.js";
-export { deleteTraceBundle, readTraceBundle } from "./trace-reader.js";
+export {
+  DEFAULT_RAW_RESPONSE_MAX_BYTES,
+  DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+  TraceObservationPort,
+} from "./trace-observation-port.js";
+export { deleteTraceBundle, readTraceBundle, readTracePayload } from "./trace-reader.js";
 export { reduceTraceBundle } from "./trace-reducer.js";
 export type {
   ApprovalTraceScope,
   AttemptTraceScope,
   ReadTraceBundleResult,
+  ReducedTraceApproval,
   ReducedTraceAttempt,
+  ReducedTraceObservation,
+  ReducedTraceProvenanceLink,
+  ReducedTraceRequest,
   ReducedTraceState,
   ReducedTraceStep,
   ReducedTraceStreamItem,
+  ReducedTraceTool,
   ReducedTraceTurn,
   StepTraceScope,
   ToolTraceScope,

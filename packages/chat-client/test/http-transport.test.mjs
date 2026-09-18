@@ -148,6 +148,26 @@ test("getRecords builds the afterSequence and limit query and returns the page",
   assert.equal(page.lastSequence, 5);
 });
 
+test("trace reads are session-scoped and preserve turn and sequence cursors", async (t) => {
+  const urls = [];
+  const { server, baseUrl } = await startFakeServer((req, res) => {
+    urls.push(req.url);
+    if (req.url.includes("/payloads/")) return json(res, 200, { payloadId: "payload_1", value: { body: true } });
+    if (req.url.includes("/traces/trace_1")) {
+      return json(res, 200, { traceId: "trace_1", lastTraceSequence: 9, unchanged: true });
+    }
+    return json(res, 200, { traces: [] });
+  });
+  t.after(() => server.close());
+  const transport = new HttpChatTransport({ baseUrl, token: "t" });
+  await transport.listTraces("conv_1", "sess_1", "turn_1");
+  await transport.getTrace("conv_1", "sess_1", "trace_1", 9);
+  await transport.getTracePayload("conv_1", "sess_1", "trace_1", "payload_1");
+  assert.equal(new URL(urls[0], baseUrl).searchParams.get("turnId"), "turn_1");
+  assert.equal(new URL(urls[1], baseUrl).searchParams.get("afterTraceSequence"), "9");
+  assert.match(urls[2], /\/traces\/trace_1\/payloads\/payload_1$/);
+});
+
 test("submitCommand returns a 200 rejected outcome as data, not as a thrown error", async (t) => {
   const { server, baseUrl } = await startFakeServer((_req, res) => {
     json(res, 200, {

@@ -11,6 +11,7 @@ import { TraceWriteQueue } from "./trace-write-queue.js";
 import { TraceBundleWriter } from "./trace-writer.js";
 
 export const DEFAULT_RAW_RESPONSE_MAX_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_TOOL_OUTPUT_MAX_BYTES = 1024 * 1024;
 
 export interface TraceObservationPortOptions {
   readonly tracesRoot: string;
@@ -20,6 +21,7 @@ export interface TraceObservationPortOptions {
   readonly traceId?: () => string;
   readonly attemptId?: () => string;
   readonly rawResponseMaxBytes?: number;
+  readonly toolOutputMaxBytes?: number;
   readonly onDegraded?: (failure: ObservationFailure) => void;
 }
 
@@ -35,12 +37,17 @@ export class TraceObservationPort implements ObservationPort {
     this.createTraceId = options.traceId ?? (() => `trace_${randomUUID()}`);
     this.createAttemptId = options.attemptId ?? (() => `attempt_${randomUUID()}`);
     const rawResponseMaxBytes = options.rawResponseMaxBytes ?? DEFAULT_RAW_RESPONSE_MAX_BYTES;
+    const toolOutputMaxBytes = options.toolOutputMaxBytes ?? DEFAULT_TOOL_OUTPUT_MAX_BYTES;
     if (!Number.isSafeInteger(rawResponseMaxBytes) || rawResponseMaxBytes < 0) {
       throw new Error("rawResponseMaxBytes must be a non-negative safe integer");
+    }
+    if (!Number.isSafeInteger(toolOutputMaxBytes) || toolOutputMaxBytes < 0) {
+      throw new Error("toolOutputMaxBytes must be a non-negative safe integer");
     }
     this.writes = new TraceWriteQueue((failure) => this.degraded(failure));
     this.handles = {
       rawResponseMaxBytes,
+      toolOutputMaxBytes,
       schedule: (operation, action) => this.writes.schedule(operation, action),
     };
   }

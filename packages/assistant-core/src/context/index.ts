@@ -1,5 +1,6 @@
 export type { BuiltInContextContributionKind } from "./kinds.js";
 export { ContextContributionKinds } from "./kinds.js";
+export { estimateContextTokens, projectModelContext, withEstimatedTokens } from "./projection.js";
 export type {
   ContextCatalogSnapshot,
   ContextContribution,
@@ -9,7 +10,11 @@ export type {
   ContextContributionScope,
   ContextContributionSource,
   ContextSelection,
+  ModelContextProjection,
   ModelContextSnapshot,
+  ProjectedContextContribution,
+  ProjectedContextMessage,
+  ProjectedToolDefinition,
 } from "./types.js";
 
 import type { ContextContributionId } from "./types.js";

@@ -6,6 +6,22 @@ export type { ResumeController } from "./resume.js";
 export { resumeConversation } from "./resume.js";
 export type { ConnectionState, ConnectionStatus, ConversationMetadata, StoreSnapshot } from "./store.js";
 export { ConversationStore } from "./store.js";
+export type { TraceInspectorState } from "./trace-controller.js";
+export { TraceInspectorController } from "./trace-controller.js";
+export type { TraceProjection } from "./trace-projector.js";
+export { projectTrace } from "./trace-projector.js";
+export type {
+  ReducedTrace,
+  TraceContextProjection,
+  TraceDetailResponse,
+  TraceEntityStatus,
+  TraceListResponse,
+  TraceObservation,
+  TracePayloadResponse,
+  TraceSelection,
+  TraceStreamItem,
+  TraceSummary,
+} from "./trace-types.js";
 export type {
   ActivateResult,
   ChatTransport,

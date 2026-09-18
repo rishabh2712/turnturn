@@ -117,6 +117,13 @@ export async function deleteTraceBundle(bundlePath: string): Promise<void> {
   await rm(bundlePath, { recursive: true, force: true });
 }
 
+export async function readTracePayload(bundlePath: string, payloadRef: string): Promise<JsonValue> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(payloadRef) || payloadRef === "." || payloadRef === "..") {
+    throw new Error("Invalid trace payload ID");
+  }
+  return JSON.parse(await readFile(join(bundlePath, "payloads", `${payloadRef}.json`), "utf8")) as JsonValue;
+}
+
 function parseManifest(value: unknown): TraceManifest {
   const record = objectRecord(value, "Invalid trace manifest");
   if (record.schemaVersion !== TRACE_SCHEMA_VERSION) throw new Error("Unsupported trace schema version");
@@ -186,6 +193,9 @@ function parseScope(value: unknown): TraceScope {
     ...(scope.toolCallId === undefined
       ? {}
       : { toolCallId: parseId("tool", nonEmptyString(scope.toolCallId, "toolCallId")) }),
+    ...(scope.providerToolCallId === undefined
+      ? {}
+      : { providerToolCallId: nonEmptyString(scope.providerToolCallId, "providerToolCallId") }),
     ...(scope.approvalId === undefined
       ? {}
       : { approvalId: parseId("appr", nonEmptyString(scope.approvalId, "approvalId")) }),

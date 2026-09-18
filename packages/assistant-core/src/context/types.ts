@@ -1,5 +1,5 @@
-import type { JsonValue } from "@turnturn/protocol";
-import type { ProviderHistory } from "@turnturn/protocol/provider-history";
+import type { JsonValue, RecordId, StepId, ToolCallId, TurnId } from "@turnturn/protocol";
+import type { ProviderHistory, ProviderHistoryItemType } from "@turnturn/protocol/provider-history";
 import type { ToolDefinition } from "../ports.js";
 
 declare const contextContributionIdBrand: unique symbol;
@@ -65,4 +65,41 @@ export interface ModelContextSnapshot {
   readonly tools: readonly ToolDefinition[];
   readonly catalog: ContextCatalogSnapshot;
   readonly selections: readonly ContextSelection[];
+}
+
+export interface ProjectedContextMessage {
+  readonly role: "user" | "assistant" | "tool";
+  readonly historyType: ProviderHistoryItemType;
+  readonly recordId: RecordId;
+  readonly sequence: number;
+  readonly turnId: TurnId;
+  readonly content: JsonValue;
+  readonly stepId?: StepId;
+  readonly toolCallId?: ToolCallId;
+  readonly providerToolCallId?: string;
+}
+
+export interface ProjectedContextContribution {
+  readonly id: ContextContributionId;
+  readonly kind: ContextContributionKind;
+  readonly scope: ContextContributionScope;
+  readonly source: ContextContributionSource;
+  readonly itemCount: number;
+  readonly estimatedTokens?: number;
+  readonly provenance?: ContextContributionProvenance;
+}
+
+export interface ProjectedToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly mutating: boolean;
+}
+
+/** Semantic, provider-neutral view used by trace reduction and later UI projection. */
+export interface ModelContextProjection {
+  readonly messages: readonly ProjectedContextMessage[];
+  readonly contributions: readonly ProjectedContextContribution[];
+  readonly selections: readonly ContextSelection[];
+  readonly tools: readonly ProjectedToolDefinition[];
+  readonly estimatedTokens: number;
 }

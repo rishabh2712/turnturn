@@ -1,10 +1,17 @@
+import type { ModelContextProjection } from "@turnturn/assistant-core/context";
+import type { ProviderAttemptCompletion } from "@turnturn/assistant-core/observability";
 import type { StepId, TurnId } from "@turnturn/protocol";
 import type {
   ReadTraceBundleResult,
+  ReducedTraceApproval,
   ReducedTraceAttempt,
+  ReducedTraceObservation,
+  ReducedTraceProvenanceLink,
+  ReducedTraceRequest,
   ReducedTraceState,
   ReducedTraceStep,
   ReducedTraceStreamItem,
+  ReducedTraceTool,
   ReducedTraceTurn,
   TraceEntityStatus,
   TraceEnvelope,
@@ -14,11 +21,15 @@ import type {
 interface MutableEntity {
   status: TraceEntityStatus;
   terminalSequence?: number;
+  startedAt?: string;
+  terminalAt?: string;
 }
 
 interface MutableStep extends MutableEntity {
   readonly stepId: StepId;
   readonly turnId: TurnId;
+  context?: ModelContextProjection;
+  contextPayloadRef?: string;
 }
 
 interface MutableAttempt extends MutableEntity {
@@ -26,6 +37,24 @@ interface MutableAttempt extends MutableEntity {
   readonly stepId: StepId;
   readonly turnId: TurnId;
   readonly stream: ReducedTraceStreamItem[];
+  started?: ReducedTraceObservation;
+  request?: ReducedTraceRequest;
+  responseMetadata?: ReducedTraceObservation;
+  completion?: ProviderAttemptCompletion;
+}
+
+interface MutableTool {
+  readonly toolCallId: ReducedTraceTool["toolCallId"];
+  readonly stepId: StepId;
+  readonly providerToolCallId?: string;
+  readonly observations: ReducedTraceObservation[];
+}
+
+interface MutableApproval {
+  readonly approvalId: ReducedTraceApproval["approvalId"];
+  readonly toolCallId: ReducedTraceApproval["toolCallId"];
+  readonly stepId: StepId;
+  readonly observations: ReducedTraceObservation[];
 }
 
 export function reduceTraceBundle(bundle: ReadTraceBundleResult): ReducedTraceState {
@@ -35,17 +64,29 @@ export function reduceTraceBundle(bundle: ReadTraceBundleResult): ReducedTraceSt
   };
   const steps = new Map<StepId, MutableStep>();
   const attempts = new Map<string, MutableAttempt>();
+  const tools = new Map<ReducedTraceTool["toolCallId"], MutableTool>();
+  const approvals = new Map<ReducedTraceApproval["approvalId"], MutableApproval>();
   const payloadReferences = new Set<string>();
   const issues = [...bundle.issues];
 
   for (const envelope of bundle.envelopes) {
     if (envelope.payloadRef !== undefined) payloadReferences.add(envelope.payloadRef);
-    if (envelope.type === "turn.started") turn.status = turn.status === "unknown" ? "running" : turn.status;
+    if (envelope.type === "turn.started") {
+      turn.status = turn.status === "unknown" ? "running" : turn.status;
+      turn.startedAt = envelope.observedAt;
+    }
     applyTurnTerminal(turn, envelope, issues);
 
     if (envelope.scope.stepId !== undefined) {
       const step = getOrCreateStep(steps, envelope, issues);
-      if (envelope.type === "step.started") step.status = step.status === "unknown" ? "running" : step.status;
+      if (envelope.type === "step.started") {
+        step.status = step.status === "unknown" ? "running" : step.status;
+        step.startedAt = envelope.observedAt;
+      }
+      if (envelope.type === "step.model-context" && envelope.data !== undefined) {
+        step.context = envelope.data as unknown as ModelContextProjection;
+        if (envelope.payloadRef !== undefined) step.contextPayloadRef = envelope.payloadRef;
+      }
       applyStepTerminal(step, envelope, issues);
     }
 
@@ -53,21 +94,97 @@ export function reduceTraceBundle(bundle: ReadTraceBundleResult): ReducedTraceSt
       const attempt = getOrCreateAttempt(attempts, steps, envelope, issues);
       if (envelope.type === "attempt.started") {
         attempt.status = attempt.status === "unknown" ? "running" : attempt.status;
+        attempt.startedAt = envelope.observedAt;
+        attempt.started = observation(envelope);
+      }
+      if (envelope.type === "attempt.wire-request") {
+        attempt.request = {
+          traceSequence: envelope.traceSequence,
+          observedAt: envelope.observedAt,
+          ...(envelope.data === undefined ? {} : { data: envelope.data }),
+          ...(envelope.payloadRef === undefined ? {} : { payloadRef: envelope.payloadRef }),
+        };
+      }
+      if (envelope.type === "attempt.response-metadata") {
+        attempt.responseMetadata = observation(envelope);
+      }
+      if (envelope.type === "attempt.completed" && envelope.data !== undefined) {
+        attempt.completion = envelope.data as unknown as ProviderAttemptCompletion;
       }
       applyAttemptTerminal(attempt, envelope, issues);
       const streamItem = reduceStreamItem(envelope);
       if (streamItem !== undefined) attempt.stream.push(streamItem);
     }
+
+    if (envelope.type === "tool.observed") observeTool(tools, envelope);
+    if (envelope.type === "approval.observed") observeApproval(approvals, envelope);
   }
+
+  const frozenTools = [...tools.values()].map(freezeTool);
+  const frozenAttempts = [...attempts.values()].map(freezeAttempt);
+  const frozenSteps = [...steps.values()].map(freezeStep);
 
   return {
     traceId: bundle.manifest.traceId,
     turns: [freezeTurn(turn)],
-    steps: [...steps.values()].map(freezeStep),
-    attempts: [...attempts.values()].map(freezeAttempt),
+    steps: frozenSteps,
+    attempts: frozenAttempts,
+    tools: frozenTools,
+    approvals: [...approvals.values()].map(freezeApproval),
+    provenanceLinks: provenanceLinks(frozenSteps, frozenAttempts, frozenTools),
     payloadReferences: [...payloadReferences],
     issues,
   };
+}
+
+function observeTool(tools: Map<ReducedTraceTool["toolCallId"], MutableTool>, envelope: TraceEnvelope): void {
+  const { toolCallId, stepId } = envelope.scope;
+  if (toolCallId === undefined || stepId === undefined) throw new Error("Tool observation has incomplete scope");
+  let tool = tools.get(toolCallId);
+  if (tool === undefined) {
+    tool = {
+      toolCallId,
+      stepId,
+      ...(envelope.scope.providerToolCallId === undefined
+        ? {}
+        : { providerToolCallId: envelope.scope.providerToolCallId }),
+      observations: [],
+    };
+    tools.set(toolCallId, tool);
+  }
+  tool.observations.push(observation(envelope));
+}
+
+function observeApproval(
+  approvals: Map<ReducedTraceApproval["approvalId"], MutableApproval>,
+  envelope: TraceEnvelope,
+): void {
+  const { approvalId, toolCallId, stepId } = envelope.scope;
+  if (approvalId === undefined || toolCallId === undefined || stepId === undefined) {
+    throw new Error("Approval observation has incomplete scope");
+  }
+  let approval = approvals.get(approvalId);
+  if (approval === undefined) {
+    approval = { approvalId, toolCallId, stepId, observations: [] };
+    approvals.set(approvalId, approval);
+  }
+  approval.observations.push(observation(envelope));
+}
+
+function observation(envelope: TraceEnvelope): ReducedTraceObservation {
+  const observedType = objectString(envelope.data, "type") ?? envelope.type;
+  return {
+    traceSequence: envelope.traceSequence,
+    observedAt: envelope.observedAt,
+    type: observedType,
+    ...(envelope.data === undefined ? {} : { data: envelope.data }),
+  };
+}
+
+function objectString(value: unknown, key: string): string | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : undefined;
 }
 
 function getOrCreateStep(steps: Map<StepId, MutableStep>, envelope: TraceEnvelope, issues: TraceIssue[]): MutableStep {
@@ -158,12 +275,15 @@ function applyTerminal(
   }
   entity.status = status;
   entity.terminalSequence = envelope.traceSequence;
+  entity.terminalAt = envelope.observedAt;
 }
 
 function freezeTurn(turn: MutableEntity & { readonly turnId: TurnId }): ReducedTraceTurn {
   return {
     turnId: turn.turnId,
     status: turn.status,
+    ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
+    ...(turn.terminalAt === undefined ? {} : { terminalAt: turn.terminalAt }),
     ...(turn.terminalSequence === undefined ? {} : { terminalSequence: turn.terminalSequence }),
   };
 }
@@ -173,6 +293,10 @@ function freezeStep(step: MutableStep): ReducedTraceStep {
     stepId: step.stepId,
     turnId: step.turnId,
     status: step.status,
+    ...(step.startedAt === undefined ? {} : { startedAt: step.startedAt }),
+    ...(step.terminalAt === undefined ? {} : { terminalAt: step.terminalAt }),
+    ...(step.context === undefined ? {} : { context: step.context }),
+    ...(step.contextPayloadRef === undefined ? {} : { contextPayloadRef: step.contextPayloadRef }),
     ...(step.terminalSequence === undefined ? {} : { terminalSequence: step.terminalSequence }),
   };
 }
@@ -183,9 +307,91 @@ function freezeAttempt(attempt: MutableAttempt): ReducedTraceAttempt {
     stepId: attempt.stepId,
     turnId: attempt.turnId,
     status: attempt.status,
+    ...(attempt.startedAt === undefined ? {} : { startedAt: attempt.startedAt }),
+    ...(attempt.terminalAt === undefined ? {} : { terminalAt: attempt.terminalAt }),
     stream: attempt.stream,
+    ...(attempt.started === undefined ? {} : { started: attempt.started }),
+    ...(attempt.request === undefined ? {} : { request: attempt.request }),
+    ...(attempt.responseMetadata === undefined ? {} : { responseMetadata: attempt.responseMetadata }),
+    ...(attempt.completion === undefined ? {} : { completion: attempt.completion }),
     ...(attempt.terminalSequence === undefined ? {} : { terminalSequence: attempt.terminalSequence }),
   };
+}
+
+function freezeTool(tool: MutableTool): ReducedTraceTool {
+  return {
+    toolCallId: tool.toolCallId,
+    stepId: tool.stepId,
+    ...(tool.providerToolCallId === undefined ? {} : { providerToolCallId: tool.providerToolCallId }),
+    observations: tool.observations,
+  };
+}
+
+function freezeApproval(approval: MutableApproval): ReducedTraceApproval {
+  return {
+    approvalId: approval.approvalId,
+    toolCallId: approval.toolCallId,
+    stepId: approval.stepId,
+    observations: approval.observations,
+  };
+}
+
+function provenanceLinks(
+  steps: readonly ReducedTraceStep[],
+  attempts: readonly ReducedTraceAttempt[],
+  tools: readonly ReducedTraceTool[],
+): ReducedTraceProvenanceLink[] {
+  const links: ReducedTraceProvenanceLink[] = [];
+  for (const tool of tools) {
+    if (tool.providerToolCallId !== undefined) {
+      for (const attempt of attempts.filter((candidate) => candidate.stepId === tool.stepId)) {
+        if (attemptProducedCall(attempt, tool.providerToolCallId)) {
+          links.push({
+            type: "attempt-produced-tool-call",
+            attemptId: attempt.attemptId,
+            toolCallId: tool.toolCallId,
+            providerToolCallId: tool.providerToolCallId,
+          });
+        }
+      }
+    }
+    const result = tool.observations.find((item) => item.type === "execution-finished");
+    if (result !== undefined) {
+      links.push({ type: "tool-produced-result", toolCallId: tool.toolCallId, traceSequence: result.traceSequence });
+    }
+  }
+  for (const step of steps) {
+    if (step.context === undefined) continue;
+    const stepAttempts = attempts.filter((attempt) => attempt.stepId === step.stepId);
+    for (const message of step.context.messages) {
+      if (message.toolCallId === undefined) continue;
+      const type =
+        message.historyType === "tool.request"
+          ? "request-included-tool-call"
+          : message.historyType === "tool.result"
+            ? "request-included-tool-result"
+            : undefined;
+      if (type === undefined) continue;
+      for (const attempt of stepAttempts) {
+        links.push({
+          type,
+          attemptId: attempt.attemptId,
+          toolCallId: message.toolCallId,
+          recordId: message.recordId,
+        });
+      }
+    }
+  }
+  return links;
+}
+
+function attemptProducedCall(attempt: ReducedTraceAttempt, providerToolCallId: string): boolean {
+  return attempt.stream.some((item) => {
+    if (item.kind !== "provider-event" || item.data === undefined) return false;
+    if (objectString(item.data, "type") !== "tool-call-complete") return false;
+    const call = (item.data as Record<string, unknown>).call;
+    return objectString(call, "callId") === providerToolCallId;
+  });
 }
 
 function reduceStreamItem(envelope: TraceEnvelope): ReducedTraceStreamItem | undefined {
@@ -201,6 +407,7 @@ function reduceStreamItem(envelope: TraceEnvelope): ReducedTraceStreamItem | und
   return {
     kind,
     traceSequence: envelope.traceSequence,
+    observedAt: envelope.observedAt,
     ...(envelope.data === undefined ? {} : { data: envelope.data }),
     ...(envelope.payloadRef === undefined ? {} : { payloadRef: envelope.payloadRef }),
   };

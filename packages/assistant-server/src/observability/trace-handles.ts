@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { ModelContextSnapshot } from "@turnturn/assistant-core/context";
+import { type ModelContextSnapshot, projectModelContext } from "@turnturn/assistant-core/context";
 import type {
   ApprovalObservation,
   ProviderAttemptCompletion,
@@ -23,6 +23,7 @@ import type { TraceBundleWriter } from "./trace-writer.js";
 
 export interface TraceHandleContext {
   readonly rawResponseMaxBytes: number;
+  readonly toolOutputMaxBytes: number;
   schedule(operation: string, action: () => Promise<unknown>): void;
 }
 
@@ -38,6 +39,9 @@ export function createTraceTurnObservation(
 }
 
 class TraceTurnObservation implements TurnObservation {
+  private readonly toolOutputBytes = new Map<string, number>();
+  private readonly truncatedToolOutput = new Set<string>();
+
   constructor(
     private readonly context: TraceHandleContext,
     private readonly writer: Promise<TraceBundleWriter>,
@@ -56,10 +60,29 @@ class TraceTurnObservation implements TurnObservation {
   }
 
   observeTool(event: ToolObservation): void {
-    const scope = { ...event.scope };
+    const bounded = this.boundToolOutput(event);
+    if (bounded === undefined) return;
+    const scope = { ...bounded.scope };
     this.context.schedule("tool.observe", async () =>
-      (await this.writer).append({ type: "tool.observed", scope, data: toJson(event) }),
+      (await this.writer).append({ type: "tool.observed", scope, data: toJson(bounded) }),
     );
+  }
+
+  private boundToolOutput(event: ToolObservation): ToolObservation | undefined {
+    if (event.type !== "execution-output") return event;
+    const key = event.scope.toolCallId;
+    if (this.truncatedToolOutput.has(key)) return undefined;
+    const nextBytes = (this.toolOutputBytes.get(key) ?? 0) + Buffer.byteLength(event.text, "utf8");
+    if (nextBytes <= this.context.toolOutputMaxBytes) {
+      this.toolOutputBytes.set(key, nextBytes);
+      return event;
+    }
+    this.truncatedToolOutput.add(key);
+    return {
+      type: "execution-output-truncated",
+      scope: event.scope,
+      boundBytes: this.context.toolOutputMaxBytes,
+    };
   }
 
   observeApproval(event: ApprovalObservation): void {
@@ -102,7 +125,10 @@ class TraceStepObservation implements StepObservation {
 
   modelContext(context: ModelContextSnapshot): void {
     this.context.schedule("step.model-context", async () =>
-      (await this.writer).append({ type: "step.model-context", scope: this.scope }, toJson(context)),
+      (await this.writer).append(
+        { type: "step.model-context", scope: this.scope, data: toJson(projectModelContext(context)) },
+        toJson(context),
+      ),
     );
   }
 

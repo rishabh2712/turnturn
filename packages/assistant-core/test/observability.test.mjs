@@ -110,6 +110,7 @@ test("safe observation isolates failures from every observation method", () => {
     turn.observeTool({
       type: "validation-input",
       scope: { ...stepScope, toolCallId: formatToolCallId(uuid(5)) },
+      phase: "provider",
       name: "read",
       input: { path: "README.md" },
     });

@@ -6,15 +6,17 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   DurableRecordTypes,
+  formatApprovalId,
   formatConversationId,
   formatRecordId,
   formatSessionId,
   formatStepId,
+  formatToolCallId,
   formatTurnId,
   SCHEMA_VERSION,
 } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
-import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
+import { ProviderHistoryItemTypes, reduceProviderHistory } from "@turnturn/protocol/provider-history";
 import { JsonlSessionLogWriter } from "@turnturn/protocol/session-log";
 import {
   deleteTraceBundle,
@@ -244,6 +246,174 @@ test("raw response capture emits one truncation issue and preserves semantic eve
       [4, 5, 6],
     );
     assert.equal(reduced.attempts[0].stream[0].payloadRef, raw.payloadRef);
+  });
+});
+
+test("trace reduction preserves tool provenance, bounded output, approvals, and later model visibility", async () => {
+  await withRoot(async (root) => {
+    const ids = scope(9);
+    const firstStepId = formatStepId(uuid(91));
+    const secondStepId = formatStepId(uuid(92));
+    const toolCallId = formatToolCallId(uuid(93));
+    const approvalId = formatApprovalId(uuid(94));
+    const requestRecordId = formatRecordId(uuid(95));
+    const resultRecordId = formatRecordId(uuid(96));
+    const observation = new TraceObservationPort({
+      tracesRoot: root,
+      provider: "test-provider",
+      model: "test-model",
+      toolOutputMaxBytes: 5,
+      traceId: () => "trace_tool_provenance",
+      attemptId: (() => {
+        let attempt = 0;
+        return () => `attempt_${++attempt}`;
+      })(),
+      now: () => "2026-01-01T00:00:00.000Z",
+    });
+    const turn = observation.startTurn(ids);
+    const firstStep = turn.startStep({ ...ids, stepId: firstStepId });
+    const firstAttempt = firstStep.startProviderAttempt({ provider: "test-provider", model: "test-model" });
+    firstAttempt.providerEvent({
+      type: "tool-call-complete",
+      call: { callId: "provider-call-1", name: "probe", input: { value: 1 } },
+    });
+    firstAttempt.complete({ reason: "tool-use" });
+    firstStep.complete({ reason: "tool-use" });
+
+    const toolScope = { ...ids, stepId: firstStepId, toolCallId, providerToolCallId: "provider-call-1" };
+    turn.observeTool({
+      type: "validation-input",
+      scope: toolScope,
+      phase: "provider",
+      name: "probe",
+      input: { value: 1 },
+    });
+    turn.observeTool({
+      type: "validation-result",
+      scope: toolScope,
+      phase: "provider",
+      result: { ok: true, input: { value: 1 } },
+    });
+    turn.observeTool({ type: "policy-decision", scope: toolScope, decision: { kind: "ask", reason: "confirm" } });
+    turn.observeApproval({ type: "requested", scope: { ...toolScope, approvalId }, reason: "confirm" });
+    turn.observeApproval({ type: "resolved", scope: { ...toolScope, approvalId }, decision: "allow" });
+    turn.observeTool({ type: "execution-started", scope: toolScope, name: "probe", input: { value: 1 } });
+    turn.observeTool({ type: "execution-output", scope: toolScope, stream: "stdout", text: "abc" });
+    turn.observeTool({ type: "execution-output", scope: toolScope, stream: "stdout", text: "def" });
+    turn.observeTool({ type: "execution-output", scope: toolScope, stream: "stdout", text: "ignored" });
+    turn.observeTool({
+      type: "execution-finished",
+      scope: toolScope,
+      outcome: { kind: "completed", output: { ok: true } },
+    });
+    turn.observeTool({
+      type: "result-recorded",
+      scope: toolScope,
+      result: { status: "completed", output: { ok: true } },
+    });
+
+    await observation.flush();
+    const beforeLaterRequest = reduceTraceBundle(await readTraceBundle(join(root, "trace_tool_provenance")));
+    assert.equal(
+      beforeLaterRequest.provenanceLinks.some((link) => link.type.startsWith("request-included")),
+      false,
+    );
+
+    const secondStep = turn.startStep({ ...ids, stepId: secondStepId });
+    secondStep.modelContext({
+      history: {
+        items: [
+          {
+            type: ProviderHistoryItemTypes.ToolRequest,
+            recordId: requestRecordId,
+            sequence: 1,
+            turnId: ids.turnId,
+            stepId: firstStepId,
+            toolCallId,
+            name: "probe",
+            input: { value: 1 },
+            providerOrder: 0,
+            requiresApproval: true,
+            providerToolCallId: "provider-call-1",
+          },
+          {
+            type: ProviderHistoryItemTypes.ToolResult,
+            recordId: resultRecordId,
+            sequence: 2,
+            turnId: ids.turnId,
+            toolCallId,
+            status: "completed",
+            output: { ok: true },
+            synthetic: false,
+          },
+        ],
+        issues: [],
+        lastSequence: 2,
+      },
+      tools: [],
+      catalog: {
+        contributions: [
+          {
+            id: "tool-interactions:step-2",
+            kind: "tool-interactions",
+            scope: "step",
+            source: { kind: "durable-provider-history" },
+            content: [{ requestRecordId }, { resultRecordId }],
+            estimatedTokens: 8,
+          },
+        ],
+      },
+      selections: [{ contributionId: "tool-interactions:step-2", disposition: "included", order: 0 }],
+    });
+    const secondAttempt = secondStep.startProviderAttempt({ provider: "test-provider", model: "test-model" });
+    secondAttempt.complete({ reason: "complete", usage: { inputTokens: 21, outputTokens: 3, totalTokens: 24 } });
+    secondStep.complete({ reason: "complete" });
+    turn.complete({ reason: "complete" });
+    await observation.flush();
+
+    const reduced = reduceTraceBundle(await readTraceBundle(join(root, "trace_tool_provenance")));
+    const stored = await readTraceBundle(join(root, "trace_tool_provenance"));
+    assert.ok(stored.envelopes.every((envelope) => !("payload" in envelope.scope) && !("commandId" in envelope.scope)));
+    assert.deepEqual(
+      reduced.tools[0].observations.map((event) => event.type),
+      [
+        "validation-input",
+        "validation-result",
+        "policy-decision",
+        "execution-started",
+        "execution-output",
+        "execution-output-truncated",
+        "execution-finished",
+        "result-recorded",
+      ],
+    );
+    assert.equal(reduced.tools[0].providerToolCallId, "provider-call-1");
+    assert.deepEqual(
+      reduced.approvals[0].observations.map((event) => event.type),
+      ["requested", "resolved"],
+    );
+    assert.deepEqual(
+      reduced.provenanceLinks.map((link) => link.type),
+      [
+        "attempt-produced-tool-call",
+        "tool-produced-result",
+        "request-included-tool-call",
+        "request-included-tool-result",
+      ],
+    );
+    assert.deepEqual(
+      reduced.steps.find((step) => step.stepId === secondStepId).context.messages.map((message) => message.historyType),
+      ["tool.request", "tool.result"],
+    );
+    assert.equal(
+      reduced.steps.find((step) => step.stepId === secondStepId).context.contributions[0].estimatedTokens,
+      8,
+    );
+    assert.deepEqual(reduced.attempts.find((attempt) => attempt.stepId === secondStepId).completion.usage, {
+      inputTokens: 21,
+      outputTokens: 3,
+      totalTokens: 24,
+    });
   });
 });
 

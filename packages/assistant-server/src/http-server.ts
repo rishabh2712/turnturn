@@ -4,6 +4,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import { type CommandEnvelope, CommandTypes, type ConversationId, parseId } from "@turnturn/protocol";
 import { handleConversationApi } from "./api/conversations.js";
 import { handleReadOnlyApi } from "./api/read-only.js";
+import { handleTraceApi } from "./api/traces.js";
 import { jsonRoundTrip, parseJsonBody, writeJson } from "./json.js";
 import type { ConversationSnapshot } from "./live-broadcaster.js";
 import type { PersistentRuntime } from "./persistent-runtime.js";
@@ -48,6 +49,7 @@ async function handleRequest(
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
   if (options.persistent !== undefined && (await handleConversationApi(req, res, url, options.persistent))) return;
+  if (options.persistent !== undefined && (await handleTraceApi(req, res, url, options.persistent))) return;
   if (options.persistent !== undefined && (await handleReadOnlyApi(req, res, url, options.runtime, options.persistent)))
     return;
 

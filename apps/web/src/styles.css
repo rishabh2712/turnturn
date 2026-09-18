@@ -130,6 +130,19 @@ summary:focus-visible {
   font-size: 11px;
   font-weight: 650;
 }
+.tt-message-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tt-message-label-row button {
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  color: #777771;
+  cursor: pointer;
+  font-size: 11px;
+}
 .tt-user-message {
   align-self: flex-end;
   max-width: min(670px, 90%);
@@ -342,6 +355,165 @@ summary:focus-visible {
   opacity: 0.4;
 }
 
+.tt-inspector {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  width: min(620px, 48vw);
+  height: 100vh;
+  border-left: 1px solid #dededb;
+  box-shadow: -16px 0 45px #00000012;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+.tt-inspector-header {
+  min-height: 64px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #ececea;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tt-inspector-header div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.tt-inspector-header span {
+  overflow: hidden;
+  color: #7a7a74;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+.tt-inspector-header button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 24px;
+}
+.tt-inspector-tabs {
+  padding: 0 12px;
+  border-bottom: 1px solid #ececea;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+}
+.tt-inspector-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 11px 9px 9px;
+  background: transparent;
+  color: #777771;
+  cursor: pointer;
+  font-size: 12px;
+}
+.tt-inspector-tabs button.is-active {
+  border-bottom-color: #252522;
+  color: #252522;
+}
+.tt-inspector-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: #fafaf9;
+}
+.tt-attempt-picker {
+  padding: 9px 16px;
+  border-bottom: 1px solid #ececea;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #777771;
+  font-size: 11px;
+}
+.tt-attempt-picker select {
+  min-width: 0;
+  max-width: 70%;
+  border: 1px solid #dededb;
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: #fff;
+  color: #383834;
+  font-size: 11px;
+}
+.tt-trace-stack {
+  display: grid;
+  gap: 12px;
+}
+.tt-trace-card,
+.tt-trace-group,
+.tt-trace-payload {
+  border: 1px solid #e7e7e4;
+  border-radius: 9px;
+  background: #fff;
+}
+.tt-trace-card {
+  padding: 12px;
+}
+.tt-trace-card .tt-trace-group,
+.tt-trace-card .tt-trace-payload {
+  margin-top: 9px;
+}
+.tt-trace-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.tt-trace-heading span {
+  color: #777771;
+}
+.tt-trace-group summary {
+  padding: 9px 11px;
+  cursor: pointer;
+  color: #55554f;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tt-trace-group summary button {
+  border: 0;
+  background: transparent;
+  color: #777771;
+  cursor: pointer;
+  font-size: 10px;
+}
+.tt-trace-group pre,
+.tt-trace-payload pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  border-top: 1px solid #ececea;
+  padding: 11px;
+  color: #383834;
+  font:
+    11px / 1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tt-trace-payload button {
+  width: 100%;
+  border: 0;
+  padding: 9px 11px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #55554f;
+  font-size: 12px;
+}
+.tt-trace-empty {
+  color: #777771;
+  font-size: 13px;
+}
+
 @media (max-width: 850px) {
   .tt-app-shell {
     grid-template-columns: 210px minmax(0, 1fr);
@@ -355,5 +527,8 @@ summary:focus-visible {
   .tt-composer {
     width: calc(100% - 32px);
     margin-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .tt-inspector {
+    width: 100vw;
   }
 }

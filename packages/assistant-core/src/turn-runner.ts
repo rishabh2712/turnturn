@@ -75,7 +75,15 @@ export class TurnRunner {
       turnId: command.turnId,
     });
     this.runningTurns.set(command.turnId, runtime);
-    return { command, runtime, observation: this.options.observation.startTurn(command) };
+    return {
+      command,
+      runtime,
+      observation: this.options.observation.startTurn({
+        conversationId: command.conversationId,
+        sessionId: command.sessionId,
+        turnId: command.turnId,
+      }),
+    };
   }
 
   private async writeUserTurnStart(command: CommandEnvelope<CommandTypes.TurnSubmit>): Promise<void> {
@@ -92,12 +100,12 @@ export class TurnRunner {
       });
 
       if (step.cancelled) {
-        await this.abortCancelledProviderStep(turn.command, turn.runtime, step);
+        await this.abortCancelledProviderStep(turn, step);
         return;
       }
 
       if (step.toolCalls.length > 0) {
-        await this.toolWaves.run(turn.command, step.stepId, step.toolCalls, turn.runtime);
+        await this.toolWaves.run(turn.command, step.stepId, step.toolCalls, turn.runtime, turn.observation);
         continue;
       }
 
@@ -108,12 +116,21 @@ export class TurnRunner {
   }
 
   private async abortCancelledProviderStep(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
+    turn: TurnExecution,
     step: Awaited<ReturnType<ProviderStepRunner["run"]>>,
   ): Promise<void> {
-    await this.toolWaves.abortOutstanding(command, step.stepId, step.toolCalls, running.cancelReason);
-    await this.options.records.providerStepCompleted(command, { ...command, stepId: step.stepId }, "cancelled");
+    await this.toolWaves.abortOutstanding(
+      turn.command,
+      step.stepId,
+      step.toolCalls,
+      turn.runtime.cancelReason,
+      turn.observation,
+    );
+    await this.options.records.providerStepCompleted(
+      turn.command,
+      { ...turn.command, stepId: step.stepId },
+      "cancelled",
+    );
   }
 
   private async ensureTerminalAfterLoop(turn: TurnExecution): Promise<void> {

@@ -1,3 +1,5 @@
+import type { ModelContextProjection } from "@turnturn/assistant-core/context";
+import type { ProviderAttemptCompletion } from "@turnturn/assistant-core/observability";
 import type { ApprovalId, ConversationId, JsonValue, SessionId, StepId, ToolCallId, TurnId } from "@turnturn/protocol";
 
 export const TRACE_SCHEMA_VERSION = 1;
@@ -20,6 +22,7 @@ export interface TraceScope {
   readonly stepId?: StepId;
   readonly attemptId?: string;
   readonly toolCallId?: ToolCallId;
+  readonly providerToolCallId?: string;
   readonly approvalId?: ApprovalId;
 }
 
@@ -129,6 +132,8 @@ export interface ReducedTraceTurn {
   readonly turnId: TurnId;
   readonly status: TraceEntityStatus;
   readonly terminalSequence?: number;
+  readonly startedAt?: string;
+  readonly terminalAt?: string;
 }
 
 export interface ReducedTraceStep {
@@ -136,6 +141,17 @@ export interface ReducedTraceStep {
   readonly turnId: TurnId;
   readonly status: TraceEntityStatus;
   readonly terminalSequence?: number;
+  readonly startedAt?: string;
+  readonly terminalAt?: string;
+  readonly context?: ModelContextProjection;
+  readonly contextPayloadRef?: string;
+}
+
+export interface ReducedTraceRequest {
+  readonly traceSequence: number;
+  readonly observedAt: string;
+  readonly data?: JsonValue;
+  readonly payloadRef?: string;
 }
 
 export interface ReducedTraceAttempt {
@@ -144,12 +160,60 @@ export interface ReducedTraceAttempt {
   readonly turnId: TurnId;
   readonly status: TraceEntityStatus;
   readonly terminalSequence?: number;
+  readonly startedAt?: string;
+  readonly terminalAt?: string;
   readonly stream: readonly ReducedTraceStreamItem[];
+  readonly started?: ReducedTraceObservation;
+  readonly request?: ReducedTraceRequest;
+  readonly responseMetadata?: ReducedTraceObservation;
+  /** Provider-reported usage in this completion remains authoritative over local estimates. */
+  readonly completion?: ProviderAttemptCompletion;
 }
+
+export interface ReducedTraceObservation {
+  readonly traceSequence: number;
+  readonly observedAt: string;
+  readonly type: string;
+  readonly data?: JsonValue;
+}
+
+export interface ReducedTraceTool {
+  readonly toolCallId: ToolCallId;
+  readonly stepId: StepId;
+  readonly providerToolCallId?: string;
+  readonly observations: readonly ReducedTraceObservation[];
+}
+
+export interface ReducedTraceApproval {
+  readonly approvalId: ApprovalId;
+  readonly toolCallId: ToolCallId;
+  readonly stepId: StepId;
+  readonly observations: readonly ReducedTraceObservation[];
+}
+
+export type ReducedTraceProvenanceLink =
+  | {
+      readonly type: "attempt-produced-tool-call";
+      readonly attemptId: string;
+      readonly toolCallId: ToolCallId;
+      readonly providerToolCallId: string;
+    }
+  | {
+      readonly type: "tool-produced-result";
+      readonly toolCallId: ToolCallId;
+      readonly traceSequence: number;
+    }
+  | {
+      readonly type: "request-included-tool-call" | "request-included-tool-result";
+      readonly attemptId: string;
+      readonly toolCallId: ToolCallId;
+      readonly recordId: string;
+    };
 
 export interface ReducedTraceStreamItem {
   readonly kind: "raw-response-frame" | "provider-event" | "issue";
   readonly traceSequence: number;
+  readonly observedAt: string;
   readonly data?: JsonValue;
   readonly payloadRef?: string;
 }
@@ -159,6 +223,9 @@ export interface ReducedTraceState {
   readonly turns: readonly ReducedTraceTurn[];
   readonly steps: readonly ReducedTraceStep[];
   readonly attempts: readonly ReducedTraceAttempt[];
+  readonly tools: readonly ReducedTraceTool[];
+  readonly approvals: readonly ReducedTraceApproval[];
+  readonly provenanceLinks: readonly ReducedTraceProvenanceLink[];
   readonly payloadReferences: readonly string[];
   readonly issues: readonly TraceIssue[];
 }

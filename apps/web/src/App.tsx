@@ -5,11 +5,13 @@ import {
   type ConversationViewItem,
   type ResumeController,
   resumeConversation,
+  type TraceSelection,
 } from "@turnturn/chat-client";
 import type { ApprovalDecisions, ConversationId, TurnId } from "@turnturn/protocol";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { resolveApproval, sendTurn } from "./client-actions";
 import { ApprovalCard } from "./components/approval/ApprovalCard";
+import { TurnInspector } from "./components/developer/TurnInspector";
 import { ConversationSidebar } from "./components/shell/ConversationSidebar";
 import { ConversationListProvider, useConversationList } from "./providers/ConversationListProvider";
 import { RuntimeProvider, useRuntime } from "./providers/RuntimeProvider";
@@ -143,6 +145,7 @@ function ConversationPane(props: ConversationPaneProps) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [submittedTurnId, setSubmittedTurnId] = useState<TurnId | undefined>();
+  const [traceSelection, setTraceSelection] = useState<TraceSelection | undefined>();
   const resume = useRef<ResumeController | undefined>(undefined);
 
   useEffect(() => {
@@ -240,7 +243,12 @@ function ConversationPane(props: ConversationPaneProps) {
           </div>
         ) : null}
         {snapshot.view.items.map((item) => (
-          <TranscriptItem item={item} key={item.key} onResolveApproval={answerApproval} />
+          <TranscriptItem
+            item={item}
+            key={item.key}
+            onInspect={(selection) => setTraceSelection({ conversationId, ...selection })}
+            onResolveApproval={answerApproval}
+          />
         ))}
         {snapshot.view.activeTurn !== undefined || submittedTurnId !== undefined ? (
           <output className="tt-live-phase">
@@ -262,6 +270,14 @@ function ConversationPane(props: ConversationPaneProps) {
             : (snapshot.view.activeTurn?.phase ?? (submittedTurnId ? "Waiting for assistant" : undefined))
         }
       />
+      {traceSelection === undefined ? null : (
+        <TurnInspector
+          lifecycleKey={`${snapshot.view.items.length}:${snapshot.view.activeTurn?.phase ?? "terminal"}`}
+          onClose={() => setTraceSelection(undefined)}
+          selection={traceSelection}
+          transport={transport}
+        />
+      )}
     </div>
   );
 }
@@ -269,12 +285,14 @@ function ConversationPane(props: ConversationPaneProps) {
 function TranscriptItem({
   item,
   onResolveApproval,
+  onInspect,
 }: {
   readonly item: ConversationViewItem;
   readonly onResolveApproval: (
     item: ApprovalRequestItem,
     decision: ApprovalDecisions,
   ) => Promise<"accepted" | "cancelled">;
+  readonly onInspect: (selection: Pick<TraceSelection, "sessionId" | "turnId">) => void;
 }) {
   switch (item.kind) {
     case "user-message":
@@ -287,7 +305,14 @@ function TranscriptItem({
     case "assistant-message":
       return (
         <div className="tt-message tt-assistant-message">
-          <span className="tt-message-label">Assistant</span>
+          <span className="tt-message-label tt-message-label-row">
+            Assistant
+            {!item.streaming ? (
+              <button onClick={() => onInspect({ sessionId: item.sessionId, turnId: item.turnId })} type="button">
+                Inspect trace
+              </button>
+            ) : null}
+          </span>
           <div>
             {item.text}
             {item.streaming ? <span className="tt-cursor">▋</span> : null}

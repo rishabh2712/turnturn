@@ -11,6 +11,7 @@ import {
   ContextContributionKinds,
   formatContextContributionId,
   type ModelContextSnapshot,
+  withEstimatedTokens,
 } from "./context/index.js";
 import type { TurnObservation } from "./observability/types.js";
 import type {
@@ -54,7 +55,12 @@ export class ProviderStepRunner {
       { ...command, stepId },
       providerPayload(this.options.provider.name),
     );
-    const stepObservation = turnObservation.startStep({ ...command, stepId });
+    const stepObservation = turnObservation.startStep({
+      conversationId: command.conversationId,
+      sessionId: command.sessionId,
+      turnId: command.turnId,
+      stepId,
+    });
 
     let assistantText = "";
     const toolCalls: ProviderToolCall[] = [];
@@ -126,22 +132,34 @@ function modelContextSnapshot(
   tools: ReturnType<ToolExecutorPort["definitions"]>,
 ): ModelContextSnapshot {
   const historyId = formatContextContributionId(`history:${stepId}`);
+  const toolInteractionsId = formatContextContributionId(`tool-interactions:${stepId}`);
   const toolsId = formatContextContributionId(`tools:${stepId}`);
+  const ordinaryHistory = history.items.filter(
+    (item) => item.type === "user.input" || item.type === "assistant.message",
+  );
+  const toolInteractions = history.items.filter((item) => item.type === "tool.request" || item.type === "tool.result");
   const contributions: readonly ContextContribution[] = [
-    {
+    withEstimatedTokens({
       id: historyId,
       kind: ContextContributionKinds.ConversationHistory,
       scope: "step",
       source: { kind: "durable-provider-history" },
-      content: jsonItems(history.items),
-    },
-    {
+      content: jsonItems(ordinaryHistory),
+    }),
+    withEstimatedTokens({
+      id: toolInteractionsId,
+      kind: ContextContributionKinds.ToolInteractions,
+      scope: "step",
+      source: { kind: "durable-provider-history" },
+      content: jsonItems(toolInteractions),
+    }),
+    withEstimatedTokens({
       id: toolsId,
       kind: ContextContributionKinds.ToolDefinitions,
       scope: "step",
       source: { kind: "tool-executor" },
       content: jsonItems(tools),
-    },
+    }),
   ];
   return {
     history,
@@ -149,7 +167,8 @@ function modelContextSnapshot(
     catalog: { contributions },
     selections: [
       { contributionId: historyId, disposition: "included", order: 0 },
-      { contributionId: toolsId, disposition: "included", order: 1 },
+      { contributionId: toolInteractionsId, disposition: "included", order: 1 },
+      { contributionId: toolsId, disposition: "included", order: 2 },
       unavailable(ContextContributionKinds.SystemInstructions, "system instructions are not wired"),
       unavailable(ContextContributionKinds.DeveloperInstructions, "developer instructions are not wired"),
       unavailable(ContextContributionKinds.WorkspaceInstructions, "workspace instructions are not wired"),
