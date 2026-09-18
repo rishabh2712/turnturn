@@ -17,6 +17,11 @@ const baseUrl = env.TURNTURN_BASE_URL;
 const apiKey = env.TURNTURN_API_KEY;
 const maxTokens = env.TURNTURN_MAX_TOKENS === undefined ? undefined : Number(env.TURNTURN_MAX_TOKENS);
 const staticDir = env.TURNTURN_WEB_DIST === undefined ? undefined : resolve(env.TURNTURN_WEB_DIST);
+const trace = env.TURNTURN_TRACE !== "0" && env.TURNTURN_TRACE !== "false";
+const traceRawResponseMaxBytes =
+  env.TURNTURN_TRACE_RAW_RESPONSE_MAX_BYTES === undefined
+    ? undefined
+    : Number(env.TURNTURN_TRACE_RAW_RESPONSE_MAX_BYTES);
 const token = randomBytes(32).toString("hex");
 
 if (!model || !["ollama", "openai-chat-completions"].includes(provider)) {
@@ -33,6 +38,8 @@ const runtime = createAssistantRuntime({
   ...(apiKey === undefined ? {} : { apiKey }),
   model,
   ...(maxTokens === undefined ? {} : { maxTokens }),
+  trace,
+  ...(traceRawResponseMaxBytes === undefined ? {} : { traceRawResponseMaxBytes }),
 });
 const persistent = await createPersistentRuntime(runtime, { port });
 const server = createAssistantHttpServer({

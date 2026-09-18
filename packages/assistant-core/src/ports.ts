@@ -16,6 +16,7 @@ import type {
   TurnId,
 } from "@turnturn/protocol";
 import type { ProviderHistory } from "@turnturn/protocol/provider-history";
+import type { StepObservation } from "./observability/types.js";
 
 export type CompletionReason = "complete" | "tool-use" | "output-limit" | "refused" | "cancelled";
 
@@ -60,7 +61,7 @@ export interface ProviderRequest {
 
 export interface ProviderPort {
   readonly name: string;
-  run(request: ProviderRequest): AsyncIterable<ProviderEvent>;
+  run(request: ProviderRequest, observation?: StepObservation): AsyncIterable<ProviderEvent>;
 }
 
 export type ToolOutcome =

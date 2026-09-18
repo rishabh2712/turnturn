@@ -1,4 +1,5 @@
 import { createAssistantEngine } from "@turnturn/assistant-core";
+import type { ObservationFailure } from "@turnturn/assistant-core/observability";
 import type {
   AssistantEngine,
   CommandOutcome,
@@ -17,6 +18,7 @@ import {
   type SessionId,
 } from "@turnturn/protocol";
 import { RuntimeClock, RuntimeIds } from "./ids.js";
+import { TraceObservationPort, traceRootForSessionLog } from "./observability/index.js";
 import type { ConversationStore } from "./storage/conversation-store.js";
 import { JsonlSessionDurableSink } from "./storage/session-sink.js";
 
@@ -25,6 +27,13 @@ export interface SessionRuntime {
   readonly sessionId: SessionId;
   readonly durable: JsonlSessionDurableSink;
   readonly engine: AssistantEngine;
+  readonly observation?: TraceObservationPort;
+}
+
+export interface SessionTraceOptions {
+  readonly enabled: boolean;
+  readonly rawResponseMaxBytes?: number;
+  readonly onDegraded?: (failure: ObservationFailure) => void;
 }
 
 export interface SessionRuntimeRegistryOptions {
@@ -37,6 +46,7 @@ export interface SessionRuntimeRegistryOptions {
   readonly clock?: EngineClock;
   readonly maxOpen?: number;
   readonly idleMs?: number;
+  readonly trace?: SessionTraceOptions;
 }
 
 interface RuntimeEntry {
@@ -93,7 +103,9 @@ export class SessionRuntimeRegistry {
     if (entry === undefined) throw new Error("SESSION_NOT_FOUND");
     entry.activeCommands += 1;
     try {
-      return await runtime.engine.submit(command);
+      const outcome = await runtime.engine.submit(command);
+      await runtime.observation?.flush();
+      return outcome;
     } finally {
       entry.activeCommands -= 1;
       entry.lastUsed = Date.now();
@@ -137,11 +149,23 @@ export class SessionRuntimeRegistry {
     const conversation = await this.options.store.get(conversationId);
     const session = conversation?.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (session === undefined) throw new Error("SESSION_NOT_IN_CONVERSATION");
+    const sessionLogPath = this.options.store.sessionPath(conversationId, sessionId);
     const durable = await JsonlSessionDurableSink.open({
-      path: this.options.store.sessionPath(conversationId, sessionId),
+      path: sessionLogPath,
       conversationId,
       sessionId,
     });
+    const observation = this.options.trace?.enabled
+      ? new TraceObservationPort({
+          tracesRoot: traceRootForSessionLog(sessionLogPath),
+          provider: session.provider,
+          model: session.model,
+          ...(this.options.trace.rawResponseMaxBytes === undefined
+            ? {}
+            : { rawResponseMaxBytes: this.options.trace.rawResponseMaxBytes }),
+          ...(this.options.trace.onDegraded === undefined ? {} : { onDegraded: this.options.trace.onDegraded }),
+        })
+      : undefined;
     const engine = createAssistantEngine({
       provider: this.options.provider,
       tools: this.options.tools,
@@ -150,6 +174,7 @@ export class SessionRuntimeRegistry {
       live: this.options.live,
       ids: this.ids,
       clock: this.clock,
+      ...(observation === undefined ? {} : { observation }),
     });
     if (durable.records().length === 0) {
       await engine.submit(this.createCommand(CommandTypes.ConversationCreate, conversationId, sessionId, {}));
@@ -157,7 +182,7 @@ export class SessionRuntimeRegistry {
         this.createCommand(CommandTypes.SessionCreate, conversationId, sessionId, { provider: session.provider }),
       );
     }
-    return { conversationId, sessionId, durable, engine };
+    return { conversationId, sessionId, durable, engine, ...(observation === undefined ? {} : { observation }) };
   }
 
   private createCommand<T extends CommandTypes.ConversationCreate | CommandTypes.SessionCreate>(

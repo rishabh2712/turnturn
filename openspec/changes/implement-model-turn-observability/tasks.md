@@ -38,34 +38,44 @@ Acceptance: the scripted-provider engine suite produces byte-for-byte-equivalent
 
 ## 2. Local trace bundle
 
-- [ ] Implement a session-scoped trace store with manifest, ordered `trace.jsonl`, payload references, and independent trace schema version.
-- [ ] Write payloads before observations that reference them; append trace envelopes through one writer-owned sequence.
-- [ ] Implement deterministic replay into an initial semantic state containing turns, steps, attempts, payload references, and issues.
-- [ ] Recover or clearly reject a torn trace tail without modifying the durable session log.
-- [ ] Test concurrent traces in two sessions, missing payloads, sequence gaps, duplicate terminals, and deletion without replay impact.
+- [x] Implement a session-scoped trace store with manifest, ordered `trace.jsonl`, payload references, and independent trace schema version.
+- [x] Write payloads before observations that reference them; append trace envelopes through one writer-owned sequence.
+- [x] Implement deterministic replay into an initial semantic state containing turns, steps, attempts, payload references, and issues.
+- [x] Recover or clearly reject a torn trace tail without modifying the durable session log.
+- [x] Test concurrent traces in two sessions, missing payloads, sequence gaps, duplicate terminals, and deletion without replay impact.
 
 Acceptance: replaying the same bundle produces deeply equal semantic state, and deleting it leaves both durable reducers unchanged.
 
 ## 3. Provider-attempt capture
 
-- [ ] Start an attempt for each concrete HTTP try, including retries and fallback when implemented.
-- [ ] Capture the provider-neutral `ModelContextSnapshot` in `ProviderStepRunner` before provider translation, including the current catalog and explicit selection for this step.
-- [ ] Capture the exact JSON body, method, route, provider, and model in chat-completions `request.ts` immediately before transport.
-- [ ] Capture response status, provider/upstream request ID when present, timing, normalized failure, usage, and terminal reason.
-- [ ] Test that the trace's wire body deep-equals the body seen by the injected HTTP client.
-- [ ] Test one failed first attempt followed by a successful second attempt; both must survive with distinct identities.
+- [x] Start an attempt for each concrete HTTP try, including retries and fallback when implemented.
+- [x] Capture the provider-neutral `ModelContextSnapshot` in `ProviderStepRunner` before provider translation, including the current catalog and explicit selection for this step.
+- [x] Capture the exact JSON body, method, route, provider, and model in chat-completions `request.ts` immediately before transport.
+- [x] Capture response status, provider/upstream request ID when present, timing, normalized failure, usage, and terminal reason.
+- [x] Test that the trace's wire body deep-equals the body seen by the injected HTTP client.
+- [x] Test one failed first attempt followed by a successful second attempt; both must survive with distinct identities.
 
 Acceptance: a single provider step can be explained attempt by attempt without consulting transient process state.
 
 ## 4. Stream translation evidence
 
-- [ ] Record ordered raw SSE data frames before `frames.ts` parses them.
-- [ ] Record each normalized `ProviderEvent` after translation.
-- [ ] Apply the configured raw payload bound and append one explicit truncation observation when exceeded.
-- [ ] Add correspondence tests for text, reasoning, interleaved tool calls, usage-after-finish, unknown finish reason, truncated tool arguments, and interrupted stream.
-- [ ] Verify the parser and adapter produce identical behavior with trace capture disabled, enabled, and failing.
+- [x] Record ordered raw SSE data frames before `frames.ts` parses them.
+- [x] Record each normalized `ProviderEvent` after translation.
+- [x] Apply the configured raw payload bound and append one explicit truncation observation when exceeded.
+- [x] Add correspondence tests for text, reasoning, interleaved tool calls, usage-after-finish, unknown finish reason, truncated tool arguments, and interrupted stream.
+- [x] Verify the parser and adapter produce identical behavior with trace capture disabled, enabled, and failing.
 
 Acceptance: the reduced trace can show a raw frame beside the provider event(s) it produced and explain protocol failure at the offending frame.
+
+## 4R. Observation plumbing cleanup
+
+- [x] Bundle command, cancellation runtime, and turn observation into one turn execution context instead of threading three sibling parameters through `TurnRunner`.
+- [x] Keep `request.ts` pure: return wire evidence with the prepared request and let the HTTP transport invoke a narrow pre-fetch hook.
+- [x] Replace parser knowledge of `ProviderAttemptObservation` with provider-local stream translation hooks.
+- [x] Split server trace write scheduling and scoped observation handles out of `trace-observation-port.ts` before tool and approval capture expands it.
+- [x] Preserve exact request timing, observation failure isolation, trace ordering, provider output, durable records, and both reducer invariants.
+
+Acceptance: observation remains explicit at turn, step, attempt, and tool ownership boundaries but disappears from pure request construction, generic transport types, parser internals, and repeated turn helper parameters.
 
 ## 5. Tool and approval provenance
 

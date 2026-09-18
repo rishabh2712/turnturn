@@ -6,19 +6,29 @@ import { providerHistoryToChatMessages } from "./history.js";
 export interface ChatCompletionsRequest {
   readonly url: URL;
   readonly init: RequestInit;
+  readonly wire: ChatCompletionsWireRequest;
+}
+
+export interface ChatCompletionsWireRequest {
+  readonly method: "POST";
+  readonly route: string;
+  readonly body: JsonValue;
 }
 
 export function buildChatCompletionsRequest(
   options: OpenAIChatCompletionsAdapterOptions,
   request: ProviderRequest,
 ): ChatCompletionsRequest {
+  const url = new URL("/v1/chat/completions", normalizedBaseUrl(options.baseUrl));
+  const body = buildChatCompletionsRequestBody(options, request);
   return {
-    url: new URL("/v1/chat/completions", normalizedBaseUrl(options.baseUrl)),
+    url,
+    wire: { method: "POST", route: url.pathname, body },
     init: {
       method: "POST",
       signal: request.signal,
       headers: buildChatCompletionsHeaders(options),
-      body: JSON.stringify(buildChatCompletionsRequestBody(options, request)),
+      body: JSON.stringify(body),
     },
   };
 }

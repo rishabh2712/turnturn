@@ -43,6 +43,26 @@ test("chat completions request targets the OpenAI-compatible route", () => {
   assert.equal(JSON.parse(request.init.body).model, "qwen");
 });
 
+test("wire evidence is the exact body serialized for fetch and excludes headers", () => {
+  const request = buildChatCompletionsRequest(
+    {
+      baseUrl: "https://gateway.example",
+      apiKey: "secret-key",
+      headers: { "X-Secret": "secret-header" },
+      model: "qwen",
+    },
+    providerRequest([user(1, "hello")]),
+  );
+
+  assert.deepEqual(request.wire, {
+    method: "POST",
+    route: "/v1/chat/completions",
+    body: JSON.parse(request.init.body),
+  });
+  assert.equal(JSON.stringify(request.wire).includes("secret-key"), false);
+  assert.equal(JSON.stringify(request.wire).includes("secret-header"), false);
+});
+
 test("chat completions request serializes all workspace tools as OpenAI function tools", () => {
   const body = buildChatCompletionsRequestBody(
     { model: "qwen" },

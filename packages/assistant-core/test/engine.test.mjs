@@ -123,6 +123,44 @@ test("throwing observation cannot prevent a durable terminal turn record", async
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
 });
 
+test("provider steps expose model context and preserve sibling provider attempts", async () => {
+  const observed = { contexts: [], attempts: [], stepTerminals: [] };
+  const observation = recordingObservation(observed);
+  const provider = {
+    name: "attempt-probe",
+    async *run(_request, step) {
+      const first = step.startProviderAttempt({ provider: "attempt-probe", model: "model" });
+      first.fail({ kind: "transport", message: "first failed", retryable: true });
+      const second = step.startProviderAttempt({ provider: "attempt-probe", model: "model" });
+      second.complete({ reason: "complete", durationMs: 5 });
+      yield { type: "completed", reason: "complete" };
+    },
+  };
+  const tools = new MemoryToolExecutor(
+    () => completed("unused"),
+    [{ name: "read", description: "Read a file", mutating: false, parameters: { type: "object" } }],
+  );
+  const { engine, durable } = await seededEngine({ provider, tools, observation });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "inspect" }, { turnId: ids.turnId }, 72));
+
+  assert.equal(observed.contexts.length, 1);
+  assert.deepEqual(
+    observed.contexts[0].catalog.contributions.map((contribution) => contribution.kind),
+    ["conversation-history", "tool-definitions"],
+  );
+  assert.deepEqual(
+    observed.contexts[0].selections.map((selection) => selection.disposition),
+    ["included", "included", "unavailable", "unavailable", "unavailable", "unavailable", "unavailable"],
+  );
+  assert.deepEqual(
+    observed.attempts.map((attempt) => attempt.terminal),
+    ["failed", "completed"],
+  );
+  assert.deepEqual(observed.stepTerminals, ["completed"]);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+});
+
 test("turn happy path persists the exact durable record type sequence", async () => {
   const provider = new ScriptedProvider([
     [
@@ -155,6 +193,57 @@ test("turn happy path persists the exact durable record type sequence", async ()
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
   assertEveryRequestedToolTerminated(durable.records());
 });
+
+function recordingObservation(observed) {
+  return {
+    startTurn() {
+      return {
+        startStep() {
+          return {
+            modelContext(context) {
+              observed.contexts.push(context);
+            },
+            startProviderAttempt() {
+              const attempt = { terminal: undefined };
+              observed.attempts.push(attempt);
+              return {
+                wireRequest() {},
+                responseMetadata() {},
+                rawResponseFrame() {},
+                providerEvent() {},
+                complete() {
+                  attempt.terminal = "completed";
+                },
+                fail() {
+                  attempt.terminal = "failed";
+                },
+                cancel() {
+                  attempt.terminal = "cancelled";
+                },
+                issue() {},
+              };
+            },
+            complete() {
+              observed.stepTerminals.push("completed");
+            },
+            fail() {
+              observed.stepTerminals.push("failed");
+            },
+            cancel() {
+              observed.stepTerminals.push("cancelled");
+            },
+          };
+        },
+        observeTool() {},
+        observeApproval() {},
+        complete() {},
+        fail() {},
+        cancel() {},
+      };
+    },
+    degraded() {},
+  };
+}
 
 test("assistant text and live deltas keep their provider step identity", async () => {
   const provider = new ScriptedProvider([

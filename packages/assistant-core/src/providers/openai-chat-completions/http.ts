@@ -1,22 +1,44 @@
 import type { ProviderEvent, ProviderRequest } from "../../ports.js";
 import type { OpenAIChatCompletionsAdapterOptions } from "./adapter.js";
-import { buildChatCompletionsRequest } from "./request.js";
+import { buildChatCompletionsRequest, type ChatCompletionsWireRequest } from "./request.js";
 
 export type ChatCompletionsHttpResult =
-  | { readonly kind: "stream"; readonly body: ReadableStream<Uint8Array> }
-  | { readonly kind: "failed"; readonly event: Extract<ProviderEvent, { readonly type: "failed" }> };
+  | {
+      readonly kind: "stream";
+      readonly body: ReadableStream<Uint8Array>;
+      readonly status?: number;
+      readonly upstreamRequestId?: string;
+    }
+  | {
+      readonly kind: "failed";
+      readonly event: Extract<ProviderEvent, { readonly type: "failed" }>;
+      readonly status?: number;
+      readonly upstreamRequestId?: string;
+    };
 
 export type ChatCompletionsHttpClient = (
   options: OpenAIChatCompletionsAdapterOptions,
   request: ProviderRequest,
+  hooks: ChatCompletionsTransportHooks,
 ) => Promise<ChatCompletionsHttpResult>;
 
-export const requestChatCompletionsStream: ChatCompletionsHttpClient = async (options, request) => {
+export interface ChatCompletionsTransportHooks {
+  readonly beforeFetch: (request: ChatCompletionsWireRequest) => void;
+}
+
+export const requestChatCompletionsStream: ChatCompletionsHttpClient = async (options, request, hooks) => {
   try {
-    const { url, init } = buildChatCompletionsRequest(options, request);
+    const { url, init, wire } = buildChatCompletionsRequest(options, request);
+    hooks.beforeFetch(wire);
     const response = await fetch(url, init);
+    const upstreamRequestId = response.headers.get("x-request-id") ?? undefined;
     if (!response.ok) {
-      return { kind: "failed", event: { type: "failed", error: await classifyHttpFailure(response) } };
+      return {
+        kind: "failed",
+        event: { type: "failed", error: await classifyHttpFailure(response) },
+        status: response.status,
+        ...(upstreamRequestId === undefined ? {} : { upstreamRequestId }),
+      };
     }
 
     if (!response.body) {
@@ -26,10 +48,17 @@ export const requestChatCompletionsStream: ChatCompletionsHttpClient = async (op
           type: "failed",
           error: { kind: "transport", message: "OpenAI chat-completions response had no body", retryable: true },
         },
+        status: response.status,
+        ...(upstreamRequestId === undefined ? {} : { upstreamRequestId }),
       };
     }
 
-    return { kind: "stream", body: response.body };
+    return {
+      kind: "stream",
+      body: response.body,
+      status: response.status,
+      ...(upstreamRequestId === undefined ? {} : { upstreamRequestId }),
+    };
   } catch (error) {
     return {
       kind: "failed",

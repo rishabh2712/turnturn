@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createSafeObservationPort } from "../../../dist/observability/context.js";
 import {
   OpenAIChatCompletionsAdapter,
   parseOpenAIChatCompletionsEvents,
 } from "../../../dist/providers/openai-chat-completions/adapter.js";
-import { classifyHttpFailure } from "../../../dist/providers/openai-chat-completions/http.js";
+import {
+  classifyHttpFailure,
+  requestChatCompletionsStream,
+} from "../../../dist/providers/openai-chat-completions/http.js";
 
 const encoder = new TextEncoder();
 
@@ -224,6 +228,142 @@ test("OpenAI chat-completions parser maps reasoning deltas from LiteLLM provider
   ]);
 });
 
+test("stream observations preserve raw-frame to provider-event correspondence", async (context) => {
+  const cases = [
+    {
+      name: "text and reasoning",
+      values: [
+        { choices: [{ index: 0, delta: { content: "answer", reasoning_content: "thinking" } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+        "[DONE]",
+      ],
+      timeline: ["raw", "text-delta", "reasoning-delta", "raw", "raw", "completed"],
+    },
+    {
+      name: "interleaved tool calls",
+      values: [
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_1", function: { name: "read", arguments: '{"path":"' } },
+                  { index: 1, id: "call_2", function: { name: "grep", arguments: '{"query":"' } },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  { index: 1, function: { arguments: 'needle"}' } },
+                  { index: 0, function: { arguments: 'README.md"}' } },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+      ],
+      timeline: [
+        "raw",
+        "tool-call-start",
+        "tool-call-arguments-delta",
+        "tool-call-start",
+        "tool-call-arguments-delta",
+        "raw",
+        "tool-call-arguments-delta",
+        "tool-call-arguments-delta",
+        "raw",
+        "tool-call-complete",
+        "tool-call-complete",
+        "completed",
+      ],
+    },
+    {
+      name: "usage after finish",
+      values: [
+        { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+        { choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
+        "[DONE]",
+      ],
+      timeline: ["raw", "raw", "usage", "raw", "completed"],
+    },
+    {
+      name: "unknown finish reason",
+      values: [{ choices: [{ index: 0, delta: {}, finish_reason: "future_reason" }] }],
+      timeline: ["raw", "failed"],
+    },
+    {
+      name: "truncated tool arguments",
+      values: [
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [{ index: 0, id: "call_1", function: { name: "read", arguments: '{"path":' } }],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+      ],
+      timeline: ["raw", "tool-call-start", "tool-call-arguments-delta", "raw", "failed"],
+    },
+    {
+      name: "interrupted stream",
+      values: [{ choices: [{ index: 0, delta: { content: "partial" } }] }],
+      timeline: ["raw", "text-delta", "failed"],
+    },
+  ];
+
+  for (const scenario of cases) {
+    await context.test(scenario.name, async () => {
+      const observation = recordingStreamObservation();
+      await collect(sse(scenario.values), observation);
+      assert.deepEqual(
+        observation.timeline.map((item) => item.type),
+        scenario.timeline,
+      );
+      assert.deepEqual(
+        observation.rawFrames.map((frame) => frame.data),
+        scenario.values.map((value) => (typeof value === "string" ? value : JSON.stringify(value))),
+      );
+    });
+  }
+});
+
+test("disabled, enabled, and failing stream observation leave adapter output identical", async () => {
+  const values = [
+    { choices: [{ index: 0, delta: { content: "same" } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+    "[DONE]",
+  ];
+  const adapter = new OpenAIChatCompletionsAdapter(
+    { baseUrl: "http://unused.example", model: "test-model" },
+    async () => ({ kind: "stream", status: 200, body: streamFromSse(values) }),
+  );
+  const enabled = recordingStepObservation();
+  const failing = failingSafeStepObservation();
+
+  const disabledEvents = await collectAdapter(adapter);
+  const enabledEvents = await collectAdapter(adapter, enabled.step);
+  const failingEvents = await collectAdapter(adapter, failing.step);
+
+  assert.deepEqual(enabledEvents, disabledEvents);
+  assert.deepEqual(failingEvents, disabledEvents);
+  assert.ok(enabled.attempts[0].rawFrames.length > 0);
+  assert.ok(enabled.attempts[0].providerEvents.length > 0);
+  assert.ok(failing.failures.some((failure) => failure.operation === "attempt.raw-response-frame"));
+  assert.ok(failing.failures.some((failure) => failure.operation === "attempt.provider-event"));
+});
+
 test("OpenAI chat-completions adapter reports fetch failures as retryable transport events", async () => {
   const adapter = new OpenAIChatCompletionsAdapter({
     baseUrl: "http://127.0.0.1:1",
@@ -246,22 +386,102 @@ test("OpenAI chat-completions adapter reports fetch failures as retryable transp
   ]);
 });
 
+test("transport exposes exact wire evidence immediately before fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  const timeline = [];
+  let fetchedBody;
+  globalThis.fetch = async (_url, init) => {
+    timeline.push("fetch");
+    fetchedBody = JSON.parse(init.body);
+    return new Response("data: [DONE]\n\n", {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+  try {
+    let wire;
+    await requestChatCompletionsStream({ baseUrl: "http://unused.example", model: "test-model" }, providerRequest(), {
+      beforeFetch(value) {
+        timeline.push("wire");
+        wire = value;
+      },
+    });
+    assert.deepEqual(timeline, ["wire", "fetch"]);
+    assert.deepEqual(wire.body, fetchedBody);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("OpenAI chat-completions adapter composes HTTP and stream parsing without a real socket", async () => {
+  const observed = recordingStepObservation();
   const adapter = new OpenAIChatCompletionsAdapter(
     {
       baseUrl: "http://unused.example",
       model: "test-model",
     },
-    async () => ({
-      kind: "stream",
-      body: streamFromSse([{ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }, "[DONE]"]),
-    }),
+    async (_options, _request, hooks) => {
+      hooks.beforeFetch({ method: "POST", route: "/v1/chat/completions", body: { model: "test-model" } });
+      return {
+        kind: "stream",
+        status: 200,
+        upstreamRequestId: "request-123",
+        body: streamFromSse([
+          { id: "chatcmpl-123", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+          "[DONE]",
+        ]),
+      };
+    },
   );
 
   const events = [];
-  for await (const event of adapter.run(providerRequest())) events.push(event);
+  for await (const event of adapter.run(providerRequest(), observed.step)) events.push(event);
 
   assert.deepEqual(events, [{ type: "completed", reason: "complete" }]);
+  assert.deepEqual(observed.attempts[0].wireRequests, [
+    { method: "POST", route: "/v1/chat/completions", body: { model: "test-model" } },
+  ]);
+  assert.deepEqual(observed.attempts[0].metadata, [{ status: 200, upstreamRequestId: "request-123" }]);
+  assert.equal(observed.attempts[0].terminal.type, "completed");
+  assert.equal(observed.attempts[0].terminal.outcome.reason, "complete");
+  assert.equal(observed.attempts[0].terminal.outcome.responseId, "chatcmpl-123");
+  assert.equal(typeof observed.attempts[0].terminal.outcome.durationMs, "number");
+});
+
+test("adapter records normalized failure and cancellation as attempt terminals", async () => {
+  const failed = recordingStepObservation();
+  const failedAdapter = new OpenAIChatCompletionsAdapter(
+    { baseUrl: "http://unused.example", model: "test-model" },
+    async () => ({
+      kind: "failed",
+      event: { type: "failed", error: { kind: "transport", message: "unavailable", retryable: true, status: 503 } },
+      status: 503,
+      upstreamRequestId: "failed-request",
+    }),
+  );
+  const failedEvents = [];
+  for await (const event of failedAdapter.run(providerRequest(), failed.step)) failedEvents.push(event);
+  assert.equal(failed.attempts[0].terminal.type, "failed");
+  assert.deepEqual(failed.attempts[0].metadata, [{ status: 503, upstreamRequestId: "failed-request" }]);
+  assert.deepEqual(failed.attempts[0].providerEvents, failedEvents);
+
+  const cancelled = recordingStepObservation();
+  const controller = new AbortController();
+  controller.abort("stop");
+  const cancelledAdapter = new OpenAIChatCompletionsAdapter(
+    { baseUrl: "http://unused.example", model: "test-model" },
+    async () => ({
+      kind: "failed",
+      event: { type: "failed", error: { kind: "transport", message: "aborted", retryable: true } },
+    }),
+  );
+  for await (const _event of cancelledAdapter.run(
+    { ...providerRequest(), signal: controller.signal },
+    cancelled.step,
+  )) {
+    // Drain the provider so the terminal observation is recorded.
+  }
+  assert.equal(cancelled.attempts[0].terminal.type, "cancelled");
 });
 
 test("OpenAI chat-completions adapter classifies HTTP failures deliberately", async () => {
@@ -279,9 +499,24 @@ test("OpenAI chat-completions adapter classifies HTTP failures deliberately", as
   });
 });
 
-async function collect(chunks) {
+async function collect(chunks, observation) {
   const events = [];
-  for await (const event of parseOpenAIChatCompletionsEvents(chunks)) events.push(event);
+  for await (const event of parseOpenAIChatCompletionsEvents(
+    chunks,
+    observation === undefined
+      ? {}
+      : {
+          onRawFrame: (frame) => observation.rawResponseFrame(frame),
+          onProviderEvent: (event) => observation.providerEvent(event),
+        },
+  ))
+    events.push(event);
+  return events;
+}
+
+async function collectAdapter(adapter, step) {
+  const events = [];
+  for await (const event of adapter.run(providerRequest(), step)) events.push(event);
   return events;
 }
 
@@ -294,6 +529,113 @@ function providerRequest() {
     history: { items: [], issues: [], lastSequence: 0 },
     signal: new AbortController().signal,
   };
+}
+
+function recordingStepObservation() {
+  const attempts = [];
+  return {
+    attempts,
+    step: {
+      modelContext() {},
+      startProviderAttempt(start) {
+        const attempt = {
+          start,
+          wireRequests: [],
+          metadata: [],
+          rawFrames: [],
+          providerEvents: [],
+          issues: [],
+          terminal: undefined,
+        };
+        attempts.push(attempt);
+        return {
+          wireRequest(value) {
+            attempt.wireRequests.push(value);
+          },
+          responseMetadata(value) {
+            attempt.metadata.push(value);
+          },
+          rawResponseFrame(frame) {
+            attempt.rawFrames.push(frame);
+          },
+          providerEvent(event) {
+            attempt.providerEvents.push(event);
+          },
+          complete(outcome) {
+            attempt.terminal = { type: "completed", outcome };
+          },
+          fail(error) {
+            attempt.terminal = { type: "failed", error };
+          },
+          cancel(reason) {
+            attempt.terminal = { type: "cancelled", reason };
+          },
+          issue(value) {
+            attempt.issues.push(value);
+          },
+        };
+      },
+      complete() {},
+      fail() {},
+      cancel() {},
+    },
+  };
+}
+
+function recordingStreamObservation() {
+  const rawFrames = [];
+  const providerEvents = [];
+  const timeline = [];
+  return {
+    rawFrames,
+    providerEvents,
+    timeline,
+    rawResponseFrame(frame) {
+      rawFrames.push(frame);
+      timeline.push({ type: "raw", value: frame });
+    },
+    providerEvent(event) {
+      providerEvents.push(event);
+      timeline.push({ type: event.type, value: event });
+    },
+  };
+}
+
+function failingSafeStepObservation() {
+  const failures = [];
+  const fail = () => {
+    throw new Error("trace unavailable");
+  };
+  const attempt = {
+    wireRequest: fail,
+    responseMetadata: fail,
+    rawResponseFrame: fail,
+    providerEvent: fail,
+    complete: fail,
+    fail,
+    cancel: fail,
+    issue: fail,
+  };
+  const step = {
+    modelContext: fail,
+    startProviderAttempt: () => attempt,
+    complete: fail,
+    fail,
+    cancel: fail,
+  };
+  const safe = createSafeObservationPort({
+    startTurn: () => ({
+      startStep: () => step,
+      observeTool: fail,
+      observeApproval: fail,
+      complete: fail,
+      fail,
+      cancel: fail,
+    }),
+    degraded: (failure) => failures.push(failure),
+  });
+  const turn = safe.startTurn(providerRequest());
+  return { failures, step: turn.startStep(providerRequest()) };
 }
 
 async function* sse(values) {

@@ -17,6 +17,7 @@ import type { DurableRecord } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { RuntimeClock, RuntimeIds } from "./ids.js";
 import { LiveBroadcaster } from "./live-broadcaster.js";
+import { DEFAULT_RAW_RESPONSE_MAX_BYTES } from "./observability/index.js";
 import { LocalToolPolicy } from "./policy.js";
 
 export type ProviderKind = "ollama" | "openai-chat-completions";
@@ -28,6 +29,8 @@ export interface AssistantServerConfig {
   readonly apiKey?: string;
   readonly model: string;
   readonly maxTokens?: number;
+  readonly trace?: boolean;
+  readonly traceRawResponseMaxBytes?: number;
 }
 
 export interface AssistantRuntime {
@@ -126,6 +129,8 @@ function publicConfig(config: AssistantServerConfig) {
     model: config.model,
     ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
     ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
+    trace: config.trace ?? false,
+    traceRawResponseMaxBytes: config.traceRawResponseMaxBytes ?? DEFAULT_RAW_RESPONSE_MAX_BYTES,
   };
 }
 

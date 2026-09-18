@@ -17,6 +17,12 @@ export interface TurnRunnerOptions {
   readonly observation: ObservationPort;
 }
 
+interface TurnExecution {
+  readonly command: CommandEnvelope<CommandTypes.TurnSubmit>;
+  readonly runtime: TurnRuntime;
+  readonly observation: TurnObservation;
+}
+
 export class TurnRunner {
   private readonly runningTurns = new Map<TurnId, TurnRuntime>();
   private readonly providerSteps: ProviderStepRunner;
@@ -39,15 +45,14 @@ export class TurnRunner {
   }
 
   async run(command: CommandEnvelope<CommandTypes.TurnSubmit>): Promise<void> {
-    const running = this.start(command);
-    const observation = this.options.observation.startTurn(command);
+    const turn = this.start(command);
 
     try {
       await this.writeUserTurnStart(command);
-      await this.runProviderToolLoop(command, running, observation);
-      await this.ensureTerminalAfterLoop(command, running, observation);
+      await this.runProviderToolLoop(turn);
+      await this.ensureTerminalAfterLoop(turn);
     } catch (error) {
-      await this.failOrAbort(command, running, observation, error);
+      await this.failOrAbort(turn, error);
     } finally {
       this.runningTurns.delete(command.turnId);
     }
@@ -63,14 +68,14 @@ export class TurnRunner {
     return true;
   }
 
-  private start(command: CommandEnvelope<CommandTypes.TurnSubmit>): TurnRuntime {
-    const running = new TurnRuntime({
+  private start(command: CommandEnvelope<CommandTypes.TurnSubmit>): TurnExecution {
+    const runtime = new TurnRuntime({
       conversationId: command.conversationId,
       sessionId: command.sessionId,
       turnId: command.turnId,
     });
-    this.runningTurns.set(command.turnId, running);
-    return running;
+    this.runningTurns.set(command.turnId, runtime);
+    return { command, runtime, observation: this.options.observation.startTurn(command) };
   }
 
   private async writeUserTurnStart(command: CommandEnvelope<CommandTypes.TurnSubmit>): Promise<void> {
@@ -78,26 +83,26 @@ export class TurnRunner {
     await this.options.records.userInputAccepted(command, command, command.payload.input);
   }
 
-  private async runProviderToolLoop(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
-    observation: TurnObservation,
-  ): Promise<void> {
-    while (!running.isCancelled) {
-      const step = await this.providerSteps.run(command, running.signal);
+  private async runProviderToolLoop(turn: TurnExecution): Promise<void> {
+    while (!turn.runtime.isCancelled) {
+      const step = await this.providerSteps.run({
+        command: turn.command,
+        signal: turn.runtime.signal,
+        observation: turn.observation,
+      });
 
       if (step.cancelled) {
-        await this.abortCancelledProviderStep(command, running, step);
+        await this.abortCancelledProviderStep(turn.command, turn.runtime, step);
         return;
       }
 
       if (step.toolCalls.length > 0) {
-        await this.toolWaves.run(command, step.stepId, step.toolCalls, running);
+        await this.toolWaves.run(turn.command, step.stepId, step.toolCalls, turn.runtime);
         continue;
       }
 
-      if (running.isCancelled) return;
-      await this.completeTurn(command, running, observation, step.reason);
+      if (turn.runtime.isCancelled) return;
+      await this.completeTurn(turn, step.reason);
       return;
     }
   }
@@ -111,72 +116,46 @@ export class TurnRunner {
     await this.options.records.providerStepCompleted(command, { ...command, stepId: step.stepId }, "cancelled");
   }
 
-  private async ensureTerminalAfterLoop(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
-    observation: TurnObservation,
-  ): Promise<void> {
-    if (running.isTerminal) return;
+  private async ensureTerminalAfterLoop(turn: TurnExecution): Promise<void> {
+    if (turn.runtime.isTerminal) return;
 
-    if (running.isCancelled) {
-      await this.abortTurn(command, running, observation, running.cancelReason);
+    if (turn.runtime.isCancelled) {
+      await this.abortTurn(turn, turn.runtime.cancelReason);
       return;
     }
 
     await this.failTurn(
-      command,
-      running,
-      observation,
+      turn,
       syntheticError("TURN_LOOP_EXITED_WITHOUT_TERMINAL", "Turn loop exited without a terminal condition"),
     );
   }
 
-  private async failOrAbort(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
-    observation: TurnObservation,
-    error: unknown,
-  ): Promise<void> {
-    if (running.isCancelled) {
-      await this.abortTurn(command, running, observation, running.cancelReason);
+  private async failOrAbort(turn: TurnExecution, error: unknown): Promise<void> {
+    if (turn.runtime.isCancelled) {
+      await this.abortTurn(turn, turn.runtime.cancelReason);
       return;
     }
 
-    await this.failTurn(command, running, observation, serializeThrown(error, "ENGINE_ERROR"));
+    await this.failTurn(turn, serializeThrown(error, "ENGINE_ERROR"));
   }
 
-  private async completeTurn(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
-    observation: TurnObservation,
-    stopReason: string,
-  ): Promise<void> {
-    await this.options.records.turnCompleted(command, command, stopReason);
-    running.markTerminal();
-    observation.complete({ reason: stopReason });
+  private async completeTurn(turn: TurnExecution, stopReason: string): Promise<void> {
+    await this.options.records.turnCompleted(turn.command, turn.command, stopReason);
+    turn.runtime.markTerminal();
+    turn.observation.complete({ reason: stopReason });
   }
 
-  private async abortTurn(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
-    observation: TurnObservation,
-    reason: string | undefined,
-  ): Promise<void> {
-    if (running.isTerminal) return;
-    await this.options.records.turnAborted(command, command, reason);
-    running.markTerminal();
-    observation.cancel(reason);
+  private async abortTurn(turn: TurnExecution, reason: string | undefined): Promise<void> {
+    if (turn.runtime.isTerminal) return;
+    await this.options.records.turnAborted(turn.command, turn.command, reason);
+    turn.runtime.markTerminal();
+    turn.observation.cancel(reason);
   }
 
-  private async failTurn(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    running: TurnRuntime,
-    observation: TurnObservation,
-    error: SerializedError,
-  ): Promise<void> {
-    await this.options.records.turnFailed(command, command, error);
-    running.markTerminal();
-    observation.fail(error);
+  private async failTurn(turn: TurnExecution, error: SerializedError): Promise<void> {
+    await this.options.records.turnFailed(turn.command, turn.command, error);
+    turn.runtime.markTerminal();
+    turn.observation.fail(error);
   }
 }
 

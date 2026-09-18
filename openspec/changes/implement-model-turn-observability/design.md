@@ -216,13 +216,16 @@ Rejected alternatives:
 
 ## Decision 8: Trace storage is a session sidecar
 
-Trace data lives under the server-owned state directory beside, but not inside, the session log:
+Trace data lives under the server-owned state directory beside, but not inside, the session log. The current storage layout uses flat ordinal-prefixed session log files, so its trace directory is a sibling derived from the exact session-log path:
 
 ```text
-conversations/<conversation>/sessions/<session>/
-  records.jsonl
-  traces/<trace-id>/...
+conversations/<conversation>/sessions/
+  000001-<session>.jsonl
+  000001-<session>.traces/
+    <trace-id>/...
 ```
+
+This avoids a durable-storage migration solely for diagnostics. Archiving moves the log and sibling trace directory together. A future session-directory migration may change both paths under the storage-version contract without changing trace semantics.
 
 One trace covers one root turn and all its provider attempts/tools. The trace manifest stores schema version, trace ID, conversation/session/turn identity, capture time, provider, and model. Trace identity is separate from turn identity so repeated diagnostic captures or imported traces remain representable.
 

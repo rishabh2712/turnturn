@@ -1,5 +1,18 @@
-import type { CommandEnvelope, CommandTypes, StepId } from "@turnturn/protocol";
+import {
+  type CommandEnvelope,
+  type CommandTypes,
+  type JsonValue,
+  type StepId,
+  serializeJson,
+} from "@turnturn/protocol";
 import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
+import {
+  type ContextContribution,
+  ContextContributionKinds,
+  formatContextContributionId,
+  type ModelContextSnapshot,
+} from "./context/index.js";
+import type { TurnObservation } from "./observability/types.js";
 import type {
   CompletionReason,
   EngineIds,
@@ -24,16 +37,24 @@ export interface ProviderStepResult {
   readonly cancelled: boolean;
 }
 
+interface ProviderStepExecution {
+  readonly command: CommandEnvelope<CommandTypes.TurnSubmit>;
+  readonly signal: AbortSignal;
+  readonly observation: TurnObservation;
+}
+
 export class ProviderStepRunner {
   constructor(private readonly options: ProviderStepRunnerOptions) {}
 
-  async run(command: CommandEnvelope<CommandTypes.TurnSubmit>, signal: AbortSignal): Promise<ProviderStepResult> {
+  async run(execution: ProviderStepExecution): Promise<ProviderStepResult> {
+    const { command, signal, observation: turnObservation } = execution;
     const stepId = this.options.ids.stepId();
     await this.options.records.providerStepStarted(
       command,
       { ...command, stepId },
       providerPayload(this.options.provider.name),
     );
+    const stepObservation = turnObservation.startStep({ ...command, stepId });
 
     let assistantText = "";
     const toolCalls: ProviderToolCall[] = [];
@@ -48,8 +69,9 @@ export class ProviderStepRunner {
       tools: this.options.tools.definitions(),
       signal,
     };
+    stepObservation.modelContext(modelContextSnapshot(stepId, request.history, request.tools));
 
-    for await (const event of this.options.provider.run(request)) {
+    for await (const event of this.options.provider.run(request, stepObservation)) {
       if (signal.aborted) break;
       switch (event.type) {
         case "text-delta":
@@ -75,6 +97,7 @@ export class ProviderStepRunner {
             { ...command, stepId },
             providerFailureError(event.error),
           );
+          stepObservation.fail(event.error);
           throw new ProviderStepFailedError(event.error);
         default:
           assertNeverProviderEvent(event);
@@ -82,6 +105,7 @@ export class ProviderStepRunner {
     }
 
     if (signal.aborted) {
+      stepObservation.cancel(signal.reason === undefined ? undefined : String(signal.reason));
       return { stepId, reason: "cancelled", toolCalls, cancelled: true };
     }
 
@@ -90,9 +114,59 @@ export class ProviderStepRunner {
       await this.options.records.assistantMessageCompleted(command, { ...command, stepId }, assistantText);
     }
     await this.options.records.providerStepCompleted(command, { ...command, stepId }, reason);
+    stepObservation.complete({ reason });
 
     return { stepId, reason, toolCalls, cancelled: false };
   }
+}
+
+function modelContextSnapshot(
+  stepId: StepId,
+  history: ReturnType<typeof reduceProviderHistory>,
+  tools: ReturnType<ToolExecutorPort["definitions"]>,
+): ModelContextSnapshot {
+  const historyId = formatContextContributionId(`history:${stepId}`);
+  const toolsId = formatContextContributionId(`tools:${stepId}`);
+  const contributions: readonly ContextContribution[] = [
+    {
+      id: historyId,
+      kind: ContextContributionKinds.ConversationHistory,
+      scope: "step",
+      source: { kind: "durable-provider-history" },
+      content: jsonItems(history.items),
+    },
+    {
+      id: toolsId,
+      kind: ContextContributionKinds.ToolDefinitions,
+      scope: "step",
+      source: { kind: "tool-executor" },
+      content: jsonItems(tools),
+    },
+  ];
+  return {
+    history,
+    tools,
+    catalog: { contributions },
+    selections: [
+      { contributionId: historyId, disposition: "included", order: 0 },
+      { contributionId: toolsId, disposition: "included", order: 1 },
+      unavailable(ContextContributionKinds.SystemInstructions, "system instructions are not wired"),
+      unavailable(ContextContributionKinds.DeveloperInstructions, "developer instructions are not wired"),
+      unavailable(ContextContributionKinds.WorkspaceInstructions, "workspace instructions are not wired"),
+      unavailable(ContextContributionKinds.Compaction, "compaction is not implemented"),
+      unavailable(ContextContributionKinds.Memory, "memory is not implemented"),
+    ],
+  };
+}
+
+function unavailable(kind: string, reason: string) {
+  return { kind, disposition: "unavailable" as const, reason };
+}
+
+function jsonItems(value: unknown): readonly JsonValue[] {
+  const parsed = JSON.parse(serializeJson(value)) as JsonValue;
+  if (!Array.isArray(parsed)) throw new Error("Context contribution content must be an array");
+  return parsed;
 }
 
 export class ProviderStepFailedError extends Error {

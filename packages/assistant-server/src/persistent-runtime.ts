@@ -34,6 +34,12 @@ export async function createPersistentRuntime(
       live: runtime.live,
       ids: runtime.ids,
       clock: runtime.clock,
+      trace: {
+        enabled: runtime.config.trace ?? false,
+        ...(runtime.config.traceRawResponseMaxBytes === undefined
+          ? {}
+          : { rawResponseMaxBytes: runtime.config.traceRawResponseMaxBytes }),
+      },
     });
     let closing: Promise<void> | undefined;
     return {
