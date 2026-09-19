@@ -308,15 +308,15 @@ These items are per adapter, not global. One shared checkbox cannot express "don
 
 `AnthropicMessagesAdapter` — `/v1/messages` SSE:
 
-- [ ] Implement the adapter. Direct Anthropic API is `truth`; Bedrock-through-LiteLLM is compatibility/deployed-environment evidence.
-- [ ] Tool-call assembly per call id; `tool-call-complete` only on successful parse.
-- [ ] Stop-reason mapping; unknown reasons become `failed: protocol` events.
-- [ ] Finish-reason/tool-call agreement (B3).
-- [ ] Failure classification with `retryable`; assert 429 and 400.
-- [ ] Serialize tool definitions as `tools[].{name,description,input_schema}`.
-- [ ] Emit usage.
+- [x] Implement the adapter. Direct Anthropic API is `truth`; Bedrock-through-LiteLLM is compatibility/deployed-environment evidence.
+- [x] Tool-call assembly per call id; `tool-call-complete` only on successful parse.
+- [x] Stop-reason mapping; unknown reasons become `failed: protocol` events.
+- [x] Finish-reason/tool-call agreement (B3).
+- [x] Failure classification with `retryable`; assert 429 and 400.
+- [x] Serialize tool definitions as `tools[].{name,description,input_schema}`.
+- [x] Emit usage.
 - [ ] Abort leaves no dangling reader.
-- [ ] History translation covers tool requests and results.
+- [x] History translation covers tool requests and results.
 - [ ] Verify against a configured lane.
 
 ### T4C — Cross-Adapter Work

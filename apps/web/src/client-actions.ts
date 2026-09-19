@@ -15,10 +15,14 @@ export async function sendTurn(
   store: ConversationStore,
   conversationId: ConversationId,
   input: string,
+  modelProfileId?: string,
 ): Promise<TurnId> {
   const text = input.trim();
   if (text.length === 0) throw new Error("Message is empty");
-  const session = await transport.activateConversation(conversationId);
+  const session = await transport.activateConversation(
+    conversationId,
+    modelProfileId === undefined ? {} : { modelProfileId },
+  );
   store.registerSession(session.sessionId, session.ordinal, session.provider, session.model);
   const turnId = formatTurnId(crypto.randomUUID());
   const commandId = formatCommandId(crypto.randomUUID());

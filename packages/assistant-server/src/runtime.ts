@@ -1,11 +1,5 @@
 import { resolve } from "node:path";
-import {
-  createAssistantEngine,
-  createWorkspaceToolExecutor,
-  MemoryDurableSink,
-  OpenAIChatCompletionsAdapter,
-  ollamaChatCompletions,
-} from "@turnturn/assistant-core";
+import { createAssistantEngine, createWorkspaceToolExecutor, MemoryDurableSink } from "@turnturn/assistant-core";
 import type {
   AssistantEngine,
   DurableSink,
@@ -17,10 +11,16 @@ import type { DurableRecord } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { RuntimeClock, RuntimeIds } from "./ids.js";
 import { LiveBroadcaster } from "./live-broadcaster.js";
+import {
+  type DiscoveryConnectionConfig,
+  ModelCatalog,
+  type ModelProfileConfig,
+  type ProviderKind,
+} from "./model-catalog.js";
 import { DEFAULT_RAW_RESPONSE_MAX_BYTES } from "./observability/index.js";
 import { LocalToolPolicy } from "./policy.js";
 
-export type ProviderKind = "ollama" | "openai-chat-completions";
+export type { DiscoveryConnectionConfig, ModelProfileConfig, ProviderKind } from "./model-catalog.js";
 
 export interface AssistantServerConfig {
   readonly workspace: string;
@@ -29,6 +29,9 @@ export interface AssistantServerConfig {
   readonly apiKey?: string;
   readonly model: string;
   readonly maxTokens?: number;
+  readonly modelProfiles?: readonly ModelProfileConfig[];
+  readonly defaultModelProfileId?: string;
+  readonly discoveryConnections?: readonly DiscoveryConnectionConfig[];
   readonly trace?: boolean;
   readonly traceRawResponseMaxBytes?: number;
 }
@@ -40,6 +43,7 @@ export interface AssistantRuntime {
   readonly engine: AssistantEngine;
   readonly ids: RuntimeIds;
   readonly live: LiveBroadcaster;
+  readonly models: ModelCatalog;
   readonly provider: ProviderPort;
   readonly tools: ToolExecutorPort;
   readonly policy: ToolPolicyPort;
@@ -61,7 +65,16 @@ export function createAssistantRuntime(config: AssistantServerConfig): Assistant
     defaultRoot: workspace,
   });
   const policy = new LocalToolPolicy();
-  const provider = createProvider(config);
+  const defaultProfileId = config.defaultModelProfileId ?? "default";
+  const models = new ModelCatalog(
+    config.modelProfiles ?? [profileFromLegacyConfig(config, defaultProfileId)],
+    defaultProfileId,
+    config.discoveryConnections ?? [],
+  );
+  const provider = models.createProvider(models.defaultProfile);
+  // Discovery augments configured profiles; startup never waits on (or fails because
+  // of) a provider being reachable (D30).
+  void models.refreshAll();
   const engine = createAssistantEngine({
     clock,
     durable,
@@ -79,6 +92,7 @@ export function createAssistantRuntime(config: AssistantServerConfig): Assistant
     engine,
     ids,
     live,
+    models,
     provider,
     tools,
     policy,
@@ -106,22 +120,6 @@ export function runtimeDebugState(runtime: AssistantRuntime) {
   };
 }
 
-function createProvider(config: AssistantServerConfig): ProviderPort {
-  if (config.provider === "ollama") {
-    return ollamaChatCompletions({
-      model: config.model,
-      ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
-      ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
-    });
-  }
-  return new OpenAIChatCompletionsAdapter({
-    baseUrl: config.baseUrl ?? "https://api.openai.com",
-    model: config.model,
-    ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
-    ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
-  });
-}
-
 function publicConfig(config: AssistantServerConfig) {
   return {
     workspace: config.workspace,
@@ -131,6 +129,18 @@ function publicConfig(config: AssistantServerConfig) {
     ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
     trace: config.trace ?? false,
     traceRawResponseMaxBytes: config.traceRawResponseMaxBytes ?? DEFAULT_RAW_RESPONSE_MAX_BYTES,
+  };
+}
+
+function profileFromLegacyConfig(config: AssistantServerConfig, id: string): ModelProfileConfig {
+  return {
+    id,
+    label: config.model,
+    provider: config.provider,
+    model: config.model,
+    ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
+    ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
+    ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
   };
 }
 

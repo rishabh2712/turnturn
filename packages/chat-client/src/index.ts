@@ -1,11 +1,21 @@
 export type { HttpChatTransportOptions } from "./http-transport.js";
 export { HttpChatTransport, TransportHttpError } from "./http-transport.js";
+export type {
+  AgentStepPresentation,
+  CommandPurpose,
+  ConversationPresentation,
+  ConversationTimelineItem,
+  ToolActionKind,
+  ToolActionPresentation,
+  TurnPresentation,
+} from "./presentation-model.js";
 export { projectConversation, projectSession } from "./projector.js";
 export type { SessionSlice } from "./reconcile.js";
 export type { ResumeController } from "./resume.js";
 export { resumeConversation } from "./resume.js";
 export type { ConnectionState, ConnectionStatus, ConversationMetadata, StoreSnapshot } from "./store.js";
 export { ConversationStore } from "./store.js";
+export { interpretShellCommand, presentToolCall } from "./tool-presentation.js";
 export type { TraceInspectorState } from "./trace-controller.js";
 export { TraceInspectorController } from "./trace-controller.js";
 export type { TraceProjection } from "./trace-projector.js";
@@ -23,6 +33,7 @@ export type {
   TraceSummary,
 } from "./trace-types.js";
 export type {
+  ActivateConversationParams,
   ActivateResult,
   ChatTransport,
   ConversationDetail,
@@ -31,16 +42,23 @@ export type {
   CreateConversationParams,
   ListConversationsParams,
   LiveSubscriptionHandlers,
+  ModelProfile,
   PatchConversationParams,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderConnectionStatus,
+  ProviderModelOption,
   RecordsPage,
   RuntimeInfo,
   SessionSummary,
   SnapshotFrame,
+  ToolCompatibility,
   ToolSummary,
   TransportCommandResult,
   WorkspaceFile,
   WorkspaceSummary,
 } from "./transport.js";
+export { composeConversationPresentation } from "./turn-projector.js";
 export type {
   ApprovalRequestItem,
   ApprovalView,

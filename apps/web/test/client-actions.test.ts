@@ -42,6 +42,24 @@ test("send activates a session, shows optimistic text, and submits a scoped turn
   );
 });
 
+test("send activates the selected model profile before submitting", async () => {
+  const store = new ConversationStore(conversationId);
+  const transport = {
+    activateConversation: vi.fn(async () => ({
+      sessionId,
+      ordinal: 1,
+      provider: "anthropic-messages",
+      model: "claude-test",
+      modelProfileId: "anthropic",
+      isNewSession: true,
+    })),
+    submitCommand: vi.fn(async () => ({ kind: "accepted" as const })),
+  } as unknown as ChatTransport;
+
+  await sendTurn(transport, store, conversationId, "hello", "anthropic");
+  expect(transport.activateConversation).toHaveBeenCalledWith(conversationId, { modelProfileId: "anthropic" });
+});
+
 test("a rejected send removes the optimistic user message", async () => {
   const store = new ConversationStore(conversationId);
   const transport = {

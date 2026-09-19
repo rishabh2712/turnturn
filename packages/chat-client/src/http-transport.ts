@@ -1,6 +1,7 @@
 import { type CommandEnvelope, type ConversationId, LiveEventTypes as Live, type SessionId } from "@turnturn/protocol";
 import type { TraceDetailResponse, TraceListResponse, TracePayloadResponse } from "./trace-types.js";
 import type {
+  ActivateConversationParams,
   ActivateResult,
   ChatTransport,
   ConversationDetail,
@@ -10,6 +11,7 @@ import type {
   ListConversationsParams,
   LiveSubscriptionHandlers,
   PatchConversationParams,
+  ProviderCatalog,
   RecordsPage,
   RuntimeInfo,
   TransportCommandResult,
@@ -46,6 +48,14 @@ export class HttpChatTransport implements ChatTransport {
     return this.request("GET", "/api/runtime");
   }
 
+  listProviders(): Promise<ProviderCatalog> {
+    return this.request("GET", "/api/providers");
+  }
+
+  refreshProviders(): Promise<ProviderCatalog> {
+    return this.request("POST", "/api/providers/refresh");
+  }
+
   listConversations(params: ListConversationsParams = {}): Promise<ConversationListPage> {
     return this.request("GET", `/api/conversations?${query(params)}`);
   }
@@ -59,8 +69,11 @@ export class HttpChatTransport implements ChatTransport {
     return this.request("GET", `/api/conversations/${conversationId}`);
   }
 
-  activateConversation(conversationId: ConversationId): Promise<ActivateResult> {
-    return this.request("POST", `/api/conversations/${conversationId}/activate`);
+  activateConversation(
+    conversationId: ConversationId,
+    params: ActivateConversationParams = {},
+  ): Promise<ActivateResult> {
+    return this.request("POST", `/api/conversations/${conversationId}/activate`, params);
   }
 
   async patchConversation(

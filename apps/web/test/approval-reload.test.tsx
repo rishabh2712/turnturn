@@ -71,6 +71,8 @@ test("a saved pending edit approval survives a UI reload and Deny dispatches its
       workspace: { key: "ws", path: "/workspace", name: "workspace" },
       provider: "test",
       model: "test",
+      defaultModelProfileId: "test",
+      models: [{ id: "test", label: "Test", provider: "test", model: "test" }],
       baseUrlHost: null,
       maxTokens: null,
       serverInstanceId: "server",
@@ -78,6 +80,8 @@ test("a saved pending edit approval survives a UI reload and Deny dispatches its
       schemaVersion: 1,
       tools: [],
     })),
+    listProviders: vi.fn(async () => ({ connections: [] })),
+    refreshProviders: vi.fn(async () => ({ connections: [] })),
     listConversations: vi.fn(async ({ archived = false } = {}) => ({
       conversations: archived ? [] : [summary],
       nextCursor: null,

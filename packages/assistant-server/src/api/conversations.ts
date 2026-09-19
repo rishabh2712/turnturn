@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type ConversationId, parseId, type SessionId } from "@turnturn/protocol";
 import { writeJson } from "../json.js";
+import type { ModelProfileConfig } from "../model-catalog.js";
 import type { PersistentRuntime } from "../persistent-runtime.js";
 
 export async function handleConversationApi(
@@ -95,7 +96,29 @@ export async function handleConversationApi(
     return true;
   }
   if (parts.length === 4 && parts[3] === "activate" && method === "POST") {
-    const session = await runtime.store.activate(conversationId);
+    const body = await readOptionalObject(req, res);
+    if (body === null) return true;
+    if (runtime.sessions.isConversationBusy(conversationId)) return error(res, 409, "CONVERSATION_BUSY");
+    if (body.modelProfileId !== undefined && typeof body.modelProfileId !== "string") {
+      return error(res, 400, "INVALID_MODEL_PROFILE");
+    }
+    let profile: ModelProfileConfig;
+    try {
+      profile = runtime.models.require(
+        typeof body.modelProfileId === "string" ? body.modelProfileId : runtime.models.defaultProfileId,
+      );
+    } catch {
+      return error(res, 404, "MODEL_PROFILE_NOT_FOUND");
+    }
+    // D30 catalog drift: a profile that reconstructs (so an old session can still be
+    // read) may no longer be selectable for a *new* activation. Reject before any
+    // provider construction or network I/O.
+    if (!runtime.models.isAvailable(profile.id)) return error(res, 409, "MODEL_PROFILE_UNAVAILABLE");
+    const session = await runtime.store.activate(conversationId, {
+      provider: profile.provider,
+      model: profile.model,
+      modelProfileId: profile.id,
+    });
     await runtime.sessions.open(conversationId, session.sessionId);
     writeJson(res, 200, session);
     return true;
@@ -123,6 +146,21 @@ export async function handleConversationApi(
     return true;
   }
   return false;
+}
+
+async function readOptionalObject(req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown> | null> {
+  try {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    const text = Buffer.concat(chunks).toString("utf8");
+    if (text.length === 0) return {};
+    const value: unknown = JSON.parse(text);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected JSON object");
+    return value as Record<string, unknown>;
+  } catch {
+    error(res, 400, "INVALID_JSON");
+    return null;
+  }
 }
 
 async function readObject(req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown> | null> {

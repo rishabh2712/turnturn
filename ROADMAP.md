@@ -145,11 +145,12 @@ Exit criteria:
 - Inline approvals, stop, retry, and continue. Scroll position held when the reader scrolls away from a streaming turn.
 - Debug surfaces behind an explicit developer mode that can read client state and not write it.
 - Per-turn model diagnostics that distinguish semantic context, exact provider request, provider response translation, runtime tool output, and later model-visible consumption.
+- Server-owned provider/model discovery for configured Anthropic, LiteLLM, and Ollama connections, with a grouped model picker and no credential or editable endpoint crossing into the browser.
 - `Host` and `Origin` validation plus a per-process token on state-changing requests, because `shell` is reachable and unsandboxed until Milestone 4.
 - The client reaches the engine only through a transport interface, and imports no `assistant-core` runtime module.
 - One real LiteLLM tool-using conversation completed end to end in the product UI, surviving a server restart.
 
-Deferred to v1.x by this milestone, named so they stop competing: queued turns, per-tool cancel, in-app model and workspace switching, multi-workspace, conversation search, attachments, transcript virtualization, and Electron packaging. Electron is a constraint on this milestone's seams, not a deliverable.
+Deferred to v1.x by this milestone, named so they stop competing: queued turns, per-tool cancel, in-app workspace switching, multi-workspace, conversation search, attachments, transcript virtualization, and Electron packaging. Electron is a constraint on this milestone's seams, not a deliverable.
 
 ## Milestone 4: Trust Loop
 

@@ -25,6 +25,8 @@ export function createFakeTransport(conversationId, options = {}) {
     deleteConversation: notImplemented("deleteConversation"),
     getWorkspaceFile: notImplemented("getWorkspaceFile"),
     submitCommand: notImplemented("submitCommand"),
+    listProviders: notImplemented("listProviders"),
+    refreshProviders: notImplemented("refreshProviders"),
 
     async getRecords(_conversationId, sessionId, afterSequence) {
       const all = recordsBySession.get(sessionId) ?? [];

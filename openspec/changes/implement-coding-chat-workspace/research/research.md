@@ -147,3 +147,23 @@ Three decisions had no usable precedent in any of the three repos and were reaso
 ## Verified library availability
 
 Checked against the registry on 2026-09-12: `react-markdown@10.1.0`, `remark-gfm@4.0.1`, `rehype-sanitize@6.0.0`, `shiki@4.4.3`, `@testing-library/react@16.3.3`, `vitest@5.0.0`, `happy-dom@20.14.5`. Claude Code's web client pins older majors of the first four; we take current majors since we have no existing usage to stay compatible with.
+
+---
+
+## Provider/model discovery amendment
+
+Date: 2026-09-20
+
+This evidence supports D30. It does not change D28's session boundary or D29's credential boundary.
+
+- Anthropic's current API overview documents `GET /v1/models` as the authenticated operation for listing available Claude models: <https://platform.claude.com/docs/en/api/overview>. This makes direct Anthropic discovery server-side and account-specific; a hardcoded model list is not required.
+- LiteLLM's proxy exposes an authenticated OpenAI-compatible model list at `GET /v1/models`. The returned names are gateway routing names. They cannot establish that the upstream wire is native Anthropic, Bedrock, Gemini, or OpenAI, so D30 deliberately keeps the configured connection and wire authoritative: <https://docs.litellm.ai/>.
+- Ollama's API documents `GET /api/tags` for locally installed models and `POST /api/show` for model metadata including `capabilities`. This lets discovery exclude embedding-only entries and represent missing tool capability without guessing: <https://github.com/ollama/ollama/blob/main/docs/api.md#list-local-models> and <https://github.com/ollama/ollama/blob/main/docs/api.md#show-model-information>.
+
+Current turnturn evidence:
+
+- `packages/assistant-server/src/cli.ts` constructs a flat profile list from `TURNTURN_MODEL` and `TURNTURN_ANTHROPIC_MODELS`.
+- `packages/assistant-server/src/model-catalog.ts` currently combines public lookup, private credentials, and adapter construction, which is why D30 introduces a provider-connection owner rather than adding discovery switches to the same class.
+- `apps/web/src/App.tsx` renders the catalog as a native `<select>`, while its `switchModel` path already has the correct D28 behavior. The task replaces presentation and catalog sourcing, not activation semantics.
+
+Discovery is deliberately treated as availability evidence, not a conformance test. A provider listing a model does not prove that it supports turnturn's tool schema or streaming edge cases. Ollama exposes explicit capabilities; other gateways may not. The three-state tool compatibility field (`supported`, `unsupported`, `unknown`) preserves that uncertainty instead of converting it into a false guarantee.

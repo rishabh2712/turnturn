@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { type CommandEnvelope, CommandTypes, type ConversationId, parseId } from "@turnturn/protocol";
 import { handleConversationApi } from "./api/conversations.js";
+import { handleProvidersApi } from "./api/providers.js";
 import { handleReadOnlyApi } from "./api/read-only.js";
 import { handleTraceApi } from "./api/traces.js";
 import { jsonRoundTrip, parseJsonBody, writeJson } from "./json.js";
@@ -52,6 +53,7 @@ async function handleRequest(
   if (options.persistent !== undefined && (await handleTraceApi(req, res, url, options.persistent))) return;
   if (options.persistent !== undefined && (await handleReadOnlyApi(req, res, url, options.runtime, options.persistent)))
     return;
+  if (await handleProvidersApi(req, res, url, options.runtime)) return;
 
   if (method === "POST" && url.pathname === "/commands") {
     await postCommand(req, res, options.runtime, options.persistent, inFlight);

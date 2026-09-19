@@ -33,6 +33,10 @@
       "types": "./dist/providers/sse.d.ts",
       "import": "./dist/providers/sse.js"
     },
+    "./providers/anthropic-messages": {
+      "types": "./dist/providers/anthropic-messages/index.d.ts",
+      "import": "./dist/providers/anthropic-messages/index.js"
+    },
     "./providers/openai-chat-completions": {
       "types": "./dist/providers/openai-chat-completions/index.d.ts",
       "import": "./dist/providers/openai-chat-completions/index.js"
@@ -72,7 +76,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "biome check .",
-    "test": "pnpm build && node --test test/*.test.mjs test/providers/*.test.mjs test/providers/openai-chat-completions/*.test.mjs",
+    "test": "pnpm build && node --test test/*.test.mjs test/providers/*.test.mjs test/providers/*/*.test.mjs",
     "typecheck": "tsc -p tsconfig.type-tests.json --noEmit"
   },
   "dependencies": {

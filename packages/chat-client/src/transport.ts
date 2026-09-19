@@ -17,12 +17,52 @@ export interface RuntimeInfo {
   readonly workspace: WorkspaceSummary;
   readonly provider: string;
   readonly model: string;
+  readonly defaultModelProfileId: string;
+  readonly models: readonly ModelProfile[];
   readonly baseUrlHost: string | null;
   readonly maxTokens: number | null;
   readonly serverInstanceId: string;
   readonly storageVersion: number;
   readonly schemaVersion: number;
   readonly tools: readonly ToolSummary[];
+}
+
+export interface ModelProfile {
+  readonly id: string;
+  readonly label: string;
+  readonly provider: string;
+  readonly model: string;
+}
+
+/** D30: `supported`/`unsupported` are provider-declared facts; `unknown` is the honest default. */
+export type ToolCompatibility = "supported" | "unsupported" | "unknown";
+
+export interface ProviderModelOption {
+  readonly id: string;
+  readonly label: string;
+  readonly model: string;
+  readonly source: "configured" | "discovered";
+  readonly toolCompatibility: ToolCompatibility;
+  readonly available: boolean;
+}
+
+export type ProviderConnectionStatus = "idle" | "refreshing" | "ok" | "error";
+
+export interface ProviderConnection {
+  readonly id: string;
+  readonly label: string;
+  readonly locality: "local" | "remote";
+  readonly wire: string;
+  readonly status: ProviderConnectionStatus;
+  readonly stale: boolean;
+  readonly lastSuccessAt: string | null;
+  readonly error: { readonly code: string } | null;
+  readonly models: readonly ProviderModelOption[];
+}
+
+/** The safe grouped DTO behind `GET /api/providers` (D30). Never carries a credential, header, or endpoint URL. */
+export interface ProviderCatalog {
+  readonly connections: readonly ProviderConnection[];
 }
 
 export interface ConversationSummary {
@@ -41,6 +81,7 @@ export interface SessionSummary {
   readonly ordinal: number;
   readonly provider: string;
   readonly model: string;
+  readonly modelProfileId?: string;
   readonly createdAt: string;
   readonly lastSequence: number;
 }
@@ -76,7 +117,12 @@ export interface ActivateResult {
   readonly ordinal: number;
   readonly provider: string;
   readonly model: string;
+  readonly modelProfileId?: string;
   readonly isNewSession: boolean;
+}
+
+export interface ActivateConversationParams {
+  readonly modelProfileId?: string;
 }
 
 export interface RecordsPage {
@@ -123,10 +169,14 @@ export interface WorkspaceFile {
  */
 export interface ChatTransport {
   getRuntime(): Promise<RuntimeInfo>;
+  /** The grouped provider/model catalog (D30). Discovery always runs server-side (D29). */
+  listProviders(): Promise<ProviderCatalog>;
+  /** Triggers a fresh, bounded, parallel discovery pass and returns the resulting snapshot. */
+  refreshProviders(): Promise<ProviderCatalog>;
   listConversations(params?: ListConversationsParams): Promise<ConversationListPage>;
   createConversation(params: CreateConversationParams): Promise<ConversationSummary>;
   getConversation(conversationId: ConversationId): Promise<ConversationDetail>;
-  activateConversation(conversationId: ConversationId): Promise<ActivateResult>;
+  activateConversation(conversationId: ConversationId, params?: ActivateConversationParams): Promise<ActivateResult>;
   patchConversation(conversationId: ConversationId, patch: PatchConversationParams): Promise<ConversationSummary>;
   deleteConversation(conversationId: ConversationId): Promise<void>;
   getRecords(

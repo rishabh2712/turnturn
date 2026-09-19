@@ -23,6 +23,7 @@ Copied from `packages/protocol` and `implement-sequential-agent-loop/tasks.md`. 
 ## Design Gate
 
 - [x] Design review by the user. Rishabh asked to start after the defaults were proposed: keep the global `/records` route removed, keep the local token, decide spec archive order later, and defer exact provider-request diagnostics.
+- [ ] D30 amendment review by the user before 5.4c implementation. Read D30, the provider/model discovery spec scenarios, and `research/{neutral-challenge,synthesis}.md`; approve or revise the provider connection, capability-state, refresh, and catalog-drift decisions.
 
 ## Implementation Tasks
 
@@ -139,6 +140,11 @@ Depends on: stage 4's implemented client package. The remaining real-server/brow
 - [x] 5.2 Delete `state.ts` and `protocol.ts` (C3–C7, C11) and rewrite `App.tsx` around `TransportProvider`, `RuntimeProvider`, and `ConversationListProvider`. The obsolete `transport.ts` was removed too. No component reads a durable record or live event directly; the browser transcript consumes `ConversationViewItem` from `ConversationStore`. Build, typecheck, tests, and lint pass.
 - [x] 5.3 Build the sidebar: workspace group header, New conversation, conversation list ordered by last activity, per-row rename and archive, archived section. Component tests cover create, rename, archive, and switch through a fake `ChatTransport`; the sidebar is wired into the served app.
 - [ ] 5.4 Build the header: inline-editable title, workspace chip, model chip, phase and connection summary, actions menu, and the read-only configuration popover showing workspace path, provider, model, and tool catalog with no credential (D22, spec "Configuration is visible without being editable"). Verify the popover contains no key and states that configuration is server-owned.
+- [x] 5.4a Add server-owned model profiles and a session-bound model selector (D28). Direct Anthropic uses the native `/v1/messages` adapter and `ANTHROPIC_API_KEY`; switching is disabled during active work, creates a new session, and no credential is serialized to the browser.
+- [x] 5.4b Add startup-only credential resolution (D29): direct environment fallback, absolute-path custom helper, automatic macOS Keychain lookup, interactive setup script, bounded one-line output, and redacted failure tests.
+- [ ] 5.4c Implement provider/model discovery and the grouped picker from D30. Use the self-contained implementer handoff below; do not infer the wire adapter from a model name and do not broaden this into editable provider configuration.
+  - Done: 5.4c.0 through 5.4c.7 (see their entries below) — `ProviderRegistry`, per-connection discovery clients with local-HTTP-fixture tests, the in-memory catalog coordinator (merge, last-started-wins, catalog-drift resilience), `GET /api/providers` / `POST /api/providers/refresh`, `ChatTransport.listProviders`/`refreshProviders`, and the grouped `ModelPicker` wired into both first-run and the conversation header. `pnpm -r build/typecheck/test/lint` and root `pnpm build/typecheck/test/lint` are all green.
+  - Remaining: 5.4c.8's manual acceptance run against real direct-Anthropic, LiteLLM, and Ollama connections has not been performed — no live credentials are configured in this environment. `ModelPicker`'s keyboard support is Tab/Enter/Space/Escape-native rather than a full roving-tabindex arrow-key listbox; consider that a follow-up rather than a blocker. Leaving this line unchecked until the manual run happens.
 - [ ] 5.5 Implement URL and local state: `/c/:conversationId` plus `?dev=1` in the URL, and last-conversation-id, per-conversation draft, sidebar collapse, and dev preference in `localStorage`. Verify selection restoration across a reload, the bare-`/` fallback chain, and that a draft survives switching away and back.
 - [ ] 5.6 Implement the empty, loading, disconnected, unopenable, and first-run states from `design.md` "Empty, loading, and failure states". Verify one test per state, including that the sidebar stays usable when a conversation cannot be opened.
 - [ ] 5.7 Implement responsive behaviour at the three breakpoints. Verify the sidebar collapses to an overlay below 1100px and that the composer respects `env(safe-area-inset-bottom)` below 768px.
@@ -146,7 +152,116 @@ Depends on: stage 4's implemented client package. The remaining real-server/brow
 
 Acceptance: the default UI shows no timeline, no raw JSON, no sequence numbers, and no Initialize button; selection survives a reload; no content crosses conversations.
 
+#### Implementer handoff — 5.4c provider/model discovery and grouped picker
+
+This section is the handoff. Do not create a second handoff document: `openspec/project.md` makes `tasks.md` the implementation instruction source of truth.
+
+**Read first, in order**
+
+1. `openspec/project.md`, especially Source of Truth, One Home Per Fact, and Commit Rule.
+2. This change's `design.md`: D6, D21, D23, D28, D29, then D30. D30 is authoritative for this task.
+3. This change's spec requirement “Provider configuration is visible without exposing editable secrets,” including all discovery scenarios.
+4. Current code: `packages/assistant-server/src/{cli.ts,credentials.ts,model-catalog.ts,runtime.ts,persistent-runtime.ts}`, `packages/assistant-server/src/api/{read-only.ts,conversations.ts}`, `packages/chat-client/src/{transport.ts,http-transport.ts}`, and `apps/web/src/App.tsx`'s `ModelSelector` and `switchModel`.
+
+**Problem statement**
+
+The current selector switches safely, but its options are a flat startup list assembled in `cli.ts` from `TURNTURN_MODEL` and `TURNTURN_ANTHROPIC_MODELS`. It cannot show which connection owns a model, discover locally installed Ollama models, reflect which models a LiteLLM key can access, represent a disconnected provider without failing the whole server, or distinguish “listed” from “known to support tools.” The browser must gain those facts without gaining endpoints, headers, or credentials.
+
+**Non-negotiable boundaries**
+
+- Do not edit `packages/protocol`; its frozen durable and live contracts are sufficient.
+- Preserve D28: selecting a different profile activates a new session and is disabled during a running turn or pending approval.
+- Preserve D29: credentials are resolved at startup and remain server-only. Discovery reuses server-held credentials; it never asks React for one.
+- Keep the current environment variables working. Dynamic discovery augments configured profiles; it does not make startup dependent on provider availability.
+- A model name never selects a wire adapter. The owning connection does.
+- Do not claim discovery proves tool correctness. Use the D30 compatibility states.
+- Do not add an on-disk discovery cache, provider editor, key-management UI, model download/pull UI, pricing data, or context-window heuristics.
+- Do not commit unless Rishabh explicitly asks.
+
+**Target flow**
+
+```text
+startup configuration + server-only credentials
+  -> ProviderRegistry (private connections and adapter factories)
+  -> parallel bounded discovery
+  -> ModelCatalog snapshot (configured profiles merged before discovered profiles)
+  -> GET /api/providers (safe grouped DTO)
+  -> ChatTransport
+  -> grouped searchable ModelPicker
+  -> activate(modelProfileId)
+  -> new session bound to the selected provider connection and model
+```
+
+**Implementation order — one reviewable slice at a time**
+
+- [x] 5.4c.0 Write server tests for the public catalog shape and leak boundary before refactoring. Seed sentinel API keys, helper paths, authorization values, and private query parameters, then assert none occurs in serialized `GET /api/providers`, `GET /api/runtime`, API errors, or refresh responses. Done in `test/api-providers.test.mjs` (`assertNoLeak` against a sentinel API key, helper path, query-string token, auth header, and private base URL, covering `/api/providers`, `/api/runtime`, refresh, and a 404 error body).
+- [x] 5.4c.1 Introduce private provider-connection types and `ProviderRegistry`. Move adapter creation out of `ModelCatalog`; keep `ModelCatalog.require`, default-profile behavior, and existing session activation passing throughout the move. Add a regression test showing that a Claude-named LiteLLM profile still creates the OpenAI chat-completions adapter. Done in `src/provider-registry.ts` (`createProviderConnection`, `ProviderRegistry`) with the adapter switch moved out of `model-catalog.ts`; regression test in `test/provider-registry.test.mjs`.
+- [x] 5.4c.2 Add pure response parsers and discovery clients per connection: paginated Anthropic `GET /v1/models`; authenticated LiteLLM `GET /v1/models`; Ollama `GET /api/tags` plus bounded `POST /api/show` capability checks. Test with byte-for-byte local HTTP fixtures, including pagination, duplicate ids, malformed JSON, unexpected shape, abort, timeout, 401/403, and 5xx. Never hit a live provider in the default suite. Done in `src/model-discovery/{types,http,anthropic,litellm,ollama}.ts`; fixtures in `test/model-discovery.test.mjs` against real local `node:http` servers (no live network).
+- [x] 5.4c.3 Add the in-memory catalog coordinator: parallel refresh, per-provider state, deterministic profile ids, configured-before-discovered merge, duplicate resolution, last-successful snapshot retention, stale marking, and last-started-wins generation control. Test two overlapping refreshes completing in reverse order and prove the older result cannot overwrite the newer snapshot. Done inside `src/model-catalog.ts` (`ModelCatalog.refreshAll`/`refreshOne`, generation counter); tests in `test/model-catalog.test.mjs`.
+- [x] 5.4c.4 Add `GET /api/providers` and token-protected `POST /api/providers/refresh`; keep `/api/runtime.models` as a projection from the same snapshot. Add `ChatTransport.listProviders()` and `refreshProviders()` plus HTTP transport tests for success and fixed error envelopes. Update the no-credential suite to include every new response. Done in `src/api/providers.ts` (routed in `http-server.ts`, already behind the shared token check), `chat-client/src/transport.ts` + `http-transport.ts`, and `chat-client/test/http-transport.test.mjs`.
+- [x] 5.4c.5 Make saved sessions resilient to catalog drift. A persisted deterministic profile must reopen even if discovery no longer lists the model; the transcript remains readable, the picker marks that selection unavailable, and a new invocation is rejected before network I/O. Add a restart-style test covering disappearance and recovery of the model. Done via `ModelCatalog.require`'s phantom reconstruction plus `isAvailable`; the `SessionRuntimeRegistry.submit` guard rejects `turn.submit` before `engine.submit` and the `/activate` route rejects before `store.activate`. Tests: `test/session-runtime-availability.test.mjs`, `test/api-providers.test.mjs`, `test/model-catalog.test.mjs`.
+- [x] 5.4c.6 Replace the native `<select>` with a dedicated `components/model/ModelPicker.tsx`: provider headings, connection state, search, configured/discovered source, tool-compatibility state, current selection, explicit Refresh, keyboard navigation, focus return, and disabled reasons. Unknown compatibility is a warning; unsupported is disabled. Keep the exact model id inspectable. Done in `apps/web/src/components/model/ModelPicker.tsx` and `apps/web/test/model-picker.test.tsx`. Keyboard support covers Tab-order-native option buttons, Enter/Space activation, and Escape-closes-and-returns-focus; arrow-key roving-tabindex navigation within the listbox was not added — flagged as a follow-up below.
+- [x] 5.4c.7 Wire the picker into first-run and conversation headers without duplicating catalog state. Verify switching still calls only `activateConversation({ modelProfileId })`, cannot happen while blocked, creates a visible session boundary, and never sends provider configuration from the browser. Done: `App.tsx`'s `useProviderCatalog` is the single fetch/refresh owner; `ModelPicker` only renders. Covered by the updated `test/app-dogfood.test.tsx` (switches to a discovered profile end to end) and existing `switchModel`/D28 behavior (unchanged).
+- [x] 5.4c.8 Update `.env.example` and `apps/web/README.md` with connection configuration and the distinction between provider, wire, and model. Docs done. The manual acceptance run with direct Anthropic, LiteLLM, and Ollama was **not** performed in this session — no live credentials were configured in this environment. Record as unverified/expected, not a reason to fake a passing live test.
+
+**Expected file ownership**
+
+| Area | Expected responsibility |
+| --- | --- |
+| `packages/assistant-server/src/provider-registry.ts` | Private connections, stable identity, adapter factories |
+| `packages/assistant-server/src/model-discovery/*` | Provider-specific fetch and pure parsing; no UI DTOs |
+| `packages/assistant-server/src/model-catalog.ts` | Merged profiles and public snapshot; no credentials |
+| `packages/assistant-server/src/api/providers.ts` | Catalog and refresh HTTP boundary |
+| `packages/chat-client/src/transport.ts` | Public provider/model DTO and transport methods |
+| `packages/chat-client/src/http-transport.ts` | HTTP implementation only |
+| `apps/web/src/components/model/*` | Picker interaction and rendering; no discovery logic |
+| `apps/web/src/App.tsx` | Selection orchestration only |
+
+Names may change if the existing layout makes a different name materially clearer, but the responsibility boundaries may not be collapsed back into `cli.ts`, `App.tsx`, or one provider-shaped utility file.
+
+**Verification after every slice**
+
+```bash
+pnpm --filter @turnturn/assistant-server lint
+pnpm --filter @turnturn/assistant-server build
+pnpm --filter @turnturn/assistant-server typecheck
+pnpm --filter @turnturn/assistant-server test
+pnpm --filter @turnturn/chat-client lint
+pnpm --filter @turnturn/chat-client build
+pnpm --filter @turnturn/chat-client typecheck
+pnpm --filter @turnturn/chat-client test
+pnpm --filter @turnturn/web lint
+pnpm --filter @turnturn/web build
+pnpm --filter @turnturn/web typecheck
+pnpm --filter @turnturn/web test
+```
+
+At completion also run `pnpm lint`, `pnpm build`, `pnpm typecheck`, and `pnpm test`. Record any live provider that was unavailable as unverified; do not convert a missing credential or offline Ollama into a synthetic live-success claim.
+
+**Completion evidence**
+
+- Every D30 spec scenario has a failing-first automated test at its owning layer.
+- A serialized-response scan proves provider secrets and complete private endpoints do not cross the server boundary.
+- A LiteLLM model named like Claude remains owned by LiteLLM and uses its configured wire.
+- One failed provider leaves the others usable and leaves configured profiles intact.
+- Reverse-order refresh completion cannot publish stale data.
+- An old conversation remains readable after its selected model disappears.
+- The UI groups options by provider, is fully keyboard operable, and switching still produces a session boundary.
+- `reduceEngineState(records).issues` and `reduceProviderHistory(records).issues` remain empty in every test that produces records.
+
 ### 6. T5 — Rich message rendering
+
+### 5A. T4A — Turn-oriented presentation composition
+
+- [x] Add a framework-free `TurnPresentation` / `AgentStepPresentation` model above the existing semantic projection (D27).
+- [x] Compose one turn from user input, ordered step messages, tool groups, approvals, and one terminal outcome without mutable duplicate state.
+- [x] Make the web transcript render turn and step components rather than flat semantic items.
+- [x] Replace generic tool JSON with purpose-built read, write, edit, search, path, and shell renderers; retain an unknown-tool fallback.
+- [x] Add conservative, display-only command interpretation with exact-command fallback.
+- [x] Verify multi-step grouping, stable identities, repeated calls, approval ownership, final-response classification, and ambiguous-command fallback.
+
+Acceptance: one tool-using request reads as `Turn → Agent step → Action → Result → Final response`; no React component interprets records or live events, and no command is assigned a semantic purpose unless its recognized form proves it.
+
 
 Files: new `apps/web/src/components/markdown/*`, `apps/web/src/components/message/*`, `apps/web/index.html` (CSP), `apps/web/package.json`.
 

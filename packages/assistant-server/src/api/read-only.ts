@@ -21,10 +21,11 @@ export async function handleReadOnlyApi(
 ): Promise<boolean> {
   if (req.method !== "GET") return false;
   if (url.pathname === "/api/runtime") {
+    const defaultProfile = runtime.models.defaultProfile;
     let baseUrlHost: string | null = null;
-    if (runtime.config.baseUrl !== undefined) {
+    if (defaultProfile.baseUrl !== undefined) {
       try {
-        baseUrlHost = new URL(runtime.config.baseUrl).host;
+        baseUrlHost = new URL(defaultProfile.baseUrl).host;
       } catch {
         baseUrlHost = null;
       }
@@ -35,10 +36,12 @@ export async function handleReadOnlyApi(
         path: persistent.state.workspacePath,
         name: basename(persistent.state.workspacePath),
       },
-      provider: runtime.config.provider,
-      model: runtime.config.model,
+      provider: defaultProfile.provider,
+      model: defaultProfile.model,
+      defaultModelProfileId: runtime.models.defaultProfileId,
+      models: runtime.models.listPublic(),
       baseUrlHost,
-      maxTokens: runtime.config.maxTokens ?? null,
+      maxTokens: defaultProfile.maxTokens ?? null,
       serverInstanceId: persistent.serverInstanceId,
       storageVersion: STORAGE_VERSION,
       schemaVersion: 1,

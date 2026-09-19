@@ -2,6 +2,7 @@ export * from "./approval-registry.js";
 export * from "./engine.js";
 export * from "./ports.js";
 export * from "./provider-step-runner.js";
+export * from "./providers/anthropic-messages/index.js";
 export * from "./providers/openai-chat-completions/index.js";
 export * from "./providers/sse.js";
 export * from "./records.js";

@@ -2,7 +2,8 @@ import {
   type ApprovalRequestItem,
   type ChatTransport,
   ConversationStore,
-  type ConversationViewItem,
+  composeConversationPresentation,
+  type ProviderCatalog,
   type ResumeController,
   resumeConversation,
   type TraceSelection,
@@ -10,13 +11,48 @@ import {
 import type { ApprovalDecisions, ConversationId, TurnId } from "@turnturn/protocol";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { resolveApproval, sendTurn } from "./client-actions";
-import { ApprovalCard } from "./components/approval/ApprovalCard";
 import { TurnInspector } from "./components/developer/TurnInspector";
+import { ModelPicker } from "./components/model/ModelPicker";
 import { ConversationSidebar } from "./components/shell/ConversationSidebar";
+import { TurnBlock } from "./components/turn/TurnBlock";
 import { ConversationListProvider, useConversationList } from "./providers/ConversationListProvider";
 import { RuntimeProvider, useRuntime } from "./providers/RuntimeProvider";
 import { useChatTransport } from "./providers/TransportProvider";
 import "./styles.css";
+
+/**
+ * The single place holding provider-catalog state (5.4c.7) — `ModelPicker` only
+ * renders what it is given. Discovery still runs server-side (D29); this just fetches
+ * the safe, already-grouped snapshot.
+ */
+function useProviderCatalog(transport: ChatTransport) {
+  const [catalog, setCatalog] = useState<ProviderCatalog | undefined>();
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void transport.listProviders().then(
+      (result) => {
+        if (active) setCatalog(result);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [transport]);
+
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      setCatalog(await transport.refreshProviders());
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  return { catalog, refresh, refreshing };
+}
 
 export function App() {
   return (
@@ -32,10 +68,18 @@ function AppShell() {
   const runtime = useRuntime();
   const list = useConversationList();
   const transport = useChatTransport();
+  const providerCatalog = useProviderCatalog(transport);
   const stores = useRef(new Map<ConversationId, ConversationStore>());
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [newConversationModelId, setNewConversationModelId] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (runtime.status === "ready" && newConversationModelId === undefined) {
+      setNewConversationModelId(runtime.runtime.defaultModelProfileId);
+    }
+  }, [runtime, newConversationModelId]);
 
   function storeFor(id: ConversationId): ConversationStore {
     let store = stores.current.get(id);
@@ -52,7 +96,7 @@ function AppShell() {
     setError(undefined);
     try {
       const id = await list.create();
-      await sendTurn(transport, storeFor(id), id, draft);
+      await sendTurn(transport, storeFor(id), id, draft, newConversationModelId);
       setDraft("");
       await list.refresh();
     } catch (cause) {
@@ -97,7 +141,11 @@ function AppShell() {
             store={storeFor(selected.conversationId)}
             transport={transport}
             workspaceName={runtime.status === "ready" ? runtime.runtime.workspace.name : "Workspace"}
-            model={runtime.status === "ready" ? runtime.runtime.model : ""}
+            models={runtime.status === "ready" ? runtime.runtime.models : []}
+            defaultModelProfileId={runtime.status === "ready" ? runtime.runtime.defaultModelProfileId : "default"}
+            catalog={providerCatalog.catalog}
+            onRefreshCatalog={providerCatalog.refresh}
+            refreshingCatalog={providerCatalog.refreshing}
             onActivity={list.refresh}
           />
         ) : list.status === "loading" || runtime.status === "loading" ? (
@@ -119,6 +167,15 @@ function AppShell() {
               busy={busy}
               footer={runtime.status === "ready" ? `${runtime.runtime.workspace.name} · ${runtime.runtime.model}` : ""}
             />
+            {runtime.status === "ready" ? (
+              <ModelPicker
+                catalog={providerCatalog.catalog}
+                value={newConversationModelId ?? runtime.runtime.defaultModelProfileId}
+                onChange={setNewConversationModelId}
+                onRefresh={() => void providerCatalog.refresh()}
+                refreshing={providerCatalog.refreshing}
+              />
+            ) : null}
           </div>
         )}
       </main>
@@ -133,7 +190,16 @@ interface ConversationPaneProps {
   readonly store: ConversationStore;
   readonly transport: ChatTransport;
   readonly workspaceName: string;
-  readonly model: string;
+  readonly models: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly provider: string;
+    readonly model: string;
+  }[];
+  readonly defaultModelProfileId: string;
+  readonly catalog: ProviderCatalog | undefined;
+  readonly onRefreshCatalog: () => Promise<void>;
+  readonly refreshingCatalog: boolean;
   readonly onActivity: () => Promise<void>;
 }
 
@@ -146,6 +212,7 @@ function ConversationPane(props: ConversationPaneProps) {
   const [busy, setBusy] = useState(false);
   const [submittedTurnId, setSubmittedTurnId] = useState<TurnId | undefined>();
   const [traceSelection, setTraceSelection] = useState<TraceSelection | undefined>();
+  const [modelProfileId, setModelProfileId] = useState(props.defaultModelProfileId);
   const resume = useRef<ResumeController | undefined>(undefined);
 
   useEffect(() => {
@@ -157,6 +224,13 @@ function ConversationPane(props: ConversationPaneProps) {
         for (const session of detail.sessions) {
           store.registerSession(session.sessionId, session.ordinal, session.provider, session.model);
         }
+        const latest = detail.sessions.at(-1);
+        setModelProfileId(
+          latest?.modelProfileId ??
+            props.models.find((profile) => profile.provider === latest?.provider && profile.model === latest?.model)
+              ?.id ??
+            props.defaultModelProfileId,
+        );
         resume.current = resumeConversation(transport, store, conversationId);
         stop = resume.current.stop;
         setLoading(false);
@@ -187,7 +261,7 @@ function ConversationPane(props: ConversationPaneProps) {
     setBusy(true);
     setError(undefined);
     try {
-      const turnId = await sendTurn(transport, store, conversationId, draft);
+      const turnId = await sendTurn(transport, store, conversationId, draft, modelProfileId);
       setSubmittedTurnId(turnId);
       setDraft("");
       await props.onActivity();
@@ -207,9 +281,27 @@ function ConversationPane(props: ConversationPaneProps) {
     return outcome;
   }
 
+  async function switchModel(nextProfileId: string) {
+    if (blocked || nextProfileId === modelProfileId) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const session = await transport.activateConversation(conversationId, { modelProfileId: nextProfileId });
+      store.registerSession(session.sessionId, session.ordinal, session.provider, session.model);
+      setModelProfileId(nextProfileId);
+      await resume.current?.refresh(session.sessionId);
+      await props.onActivity();
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const connected = snapshot.connection.status === "connected";
   const canSend = !loading && !props.archived && (connected || snapshot.connection.status === "connecting");
   const blocked = busy || submittedTurnId !== undefined || snapshot.view.activeTurn !== undefined || !canSend;
+  const presentation = composeConversationPresentation(snapshot.view);
 
   return (
     <div className="tt-conversation">
@@ -219,7 +311,16 @@ function ConversationPane(props: ConversationPaneProps) {
           <span className="tt-workspace-chip">{props.workspaceName}</span>
         </div>
         <div className="tt-header-meta">
-          <span>{props.model}</span>
+          <ModelPicker
+            disabled={blocked}
+            disabledReason={blocked ? "Switching models is disabled while a turn is active." : undefined}
+            catalog={props.catalog}
+            currentLabel={props.models.find((profile) => profile.id === modelProfileId)?.model}
+            value={modelProfileId}
+            onChange={(value) => void switchModel(value)}
+            onRefresh={() => void props.onRefreshCatalog()}
+            refreshing={props.refreshingCatalog}
+          />
           <span className={`tt-connection ${connected ? "is-connected" : ""}`}>{snapshot.connection.status}</span>
         </div>
       </header>
@@ -242,14 +343,21 @@ function ConversationPane(props: ConversationPaneProps) {
             <p>Ask about your workspace, or tell the assistant what to build.</p>
           </div>
         ) : null}
-        {snapshot.view.items.map((item) => (
-          <TranscriptItem
-            item={item}
-            key={item.key}
-            onInspect={(selection) => setTraceSelection({ conversationId, ...selection })}
-            onResolveApproval={answerApproval}
-          />
-        ))}
+        {presentation.timeline.map((item) =>
+          item.kind === "session-boundary" ? (
+            <div className="tt-status-line" key={item.key}>
+              {item.message}
+            </div>
+          ) : (
+            <TurnBlock
+              conversationId={conversationId}
+              key={item.key}
+              onInspect={setTraceSelection}
+              onResolveApproval={answerApproval}
+              turn={item}
+            />
+          ),
+        )}
         {snapshot.view.activeTurn !== undefined || submittedTurnId !== undefined ? (
           <output className="tt-live-phase">
             <span className="tt-live-dot" aria-hidden="true" />
@@ -263,7 +371,7 @@ function ConversationPane(props: ConversationPaneProps) {
         onSend={submit}
         disabled={blocked}
         busy={busy}
-        footer={`${props.workspaceName} · ${props.model}`}
+        footer={`${props.workspaceName} · ${props.models.find((profile) => profile.id === modelProfileId)?.label ?? modelProfileId}`}
         hint={
           props.archived
             ? "Unarchive to continue"
@@ -280,74 +388,6 @@ function ConversationPane(props: ConversationPaneProps) {
       )}
     </div>
   );
-}
-
-function TranscriptItem({
-  item,
-  onResolveApproval,
-  onInspect,
-}: {
-  readonly item: ConversationViewItem;
-  readonly onResolveApproval: (
-    item: ApprovalRequestItem,
-    decision: ApprovalDecisions,
-  ) => Promise<"accepted" | "cancelled">;
-  readonly onInspect: (selection: Pick<TraceSelection, "sessionId" | "turnId">) => void;
-}) {
-  switch (item.kind) {
-    case "user-message":
-      return (
-        <div className="tt-message tt-user-message">
-          <span className="tt-message-label">You</span>
-          <div>{item.text}</div>
-        </div>
-      );
-    case "assistant-message":
-      return (
-        <div className="tt-message tt-assistant-message">
-          <span className="tt-message-label tt-message-label-row">
-            Assistant
-            {!item.streaming ? (
-              <button onClick={() => onInspect({ sessionId: item.sessionId, turnId: item.turnId })} type="button">
-                Inspect trace
-              </button>
-            ) : null}
-          </span>
-          <div>
-            {item.text}
-            {item.streaming ? <span className="tt-cursor">▋</span> : null}
-          </div>
-        </div>
-      );
-    case "tool-activity":
-      return (
-        <details className="tt-tool-activity">
-          <summary>{item.summary}</summary>
-          {item.calls.map((call) => (
-            <div className="tt-tool-call" key={call.toolCallId}>
-              <strong>
-                {call.name} · {call.status}
-              </strong>
-              <pre>{JSON.stringify(call.detail, null, 2)}</pre>
-              {call.progress.map((message, index) => (
-                <div key={`${call.toolCallId}:progress:${index}`}>{message}</div>
-              ))}
-              {call.streamedOutput !== undefined ? <pre>{call.streamedOutput}</pre> : null}
-            </div>
-          ))}
-        </details>
-      );
-    case "approval-request":
-      return <ApprovalCard item={item} onResolve={(decision) => onResolveApproval(item, decision)} />;
-    case "turn-status":
-      return item.status === "completed" ? null : (
-        <div className="tt-status-line">
-          Turn {item.status}: {item.error?.message ?? item.reason}
-        </div>
-      );
-    case "session-boundary":
-      return <div className="tt-status-line">{item.message}</div>;
-  }
 }
 
 function phaseLabel(phase: string): string {

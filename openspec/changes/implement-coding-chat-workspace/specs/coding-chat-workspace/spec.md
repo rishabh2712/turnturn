@@ -8,6 +8,22 @@ Turns turnturn's browser client from a protocol observability console into a cod
 
 The client SHALL derive what it displays from a conversation projection over durable records and live events, and no view component SHALL branch on a durable record type or a live event type.
 
+#### Scenario: One request is one visual turn
+
+- **GIVEN** one user request causes multiple provider steps and tool actions
+- **WHEN** the conversation is displayed
+- **THEN** the request, ordered agent steps, actions, results, and final response SHALL appear inside one turn
+- **AND** actions SHALL remain correlated by `stepId` and `toolCallId`
+- **AND** the terminal turn outcome SHALL appear once
+
+#### Scenario: Unknown shell intent falls back without guessing
+
+- **GIVEN** a shell command whose purpose is not an unambiguous recognized shape
+- **WHEN** the action is displayed
+- **THEN** it SHALL be labelled as a command rather than assigned a guessed purpose
+- **AND** its exact command SHALL remain available
+- **AND** display interpretation SHALL NOT affect approval or execution
+
 #### Scenario: Provider steps collapse into one assistant turn
 
 - **GIVEN** a turn in which the model produced text, called tools, and then produced more text
@@ -348,9 +364,9 @@ The client SHALL present the workspace's conversations, SHALL let the user creat
 - **THEN** the transcript SHALL state that the turn was ended by the restart
 - **AND** the conversation SHALL accept a new turn
 
-### Requirement: Configuration is visible without being editable
+### Requirement: Provider configuration is visible without exposing editable secrets
 
-The client SHALL show the active workspace and model, SHALL make the tool catalog and provider identity inspectable, and SHALL NOT offer to change server-owned configuration.
+The client SHALL show the active workspace and model, SHALL make the tool catalog and provider identity inspectable, and SHALL NOT offer to edit server-owned endpoints, headers, or credentials.
 
 #### Scenario: Inspecting the active configuration
 
@@ -359,6 +375,69 @@ The client SHALL show the active workspace and model, SHALL make the tool catalo
 - **AND** the tools available to the model SHALL be listed
 - **AND** no provider credential SHALL be shown
 - **AND** the detail SHALL state that these come from server configuration
+
+#### Scenario: Selecting a configured model
+
+- **GIVEN** the server exposes more than one safe model profile
+- **WHEN** the user selects another profile while the conversation is idle
+- **THEN** the server SHALL create or reuse a session bound to that exact profile
+- **AND** the earlier transcript SHALL remain visible behind a session boundary
+- **AND** no credential or arbitrary provider URL SHALL cross into the browser
+
+#### Scenario: Model switching while work is active
+
+- **GIVEN** a turn or approval is active in the conversation
+- **WHEN** the model selector is displayed
+- **THEN** it SHALL be disabled
+- **AND** the provider used by the active session SHALL not change
+
+#### Scenario: Models are grouped by their configured provider connection
+
+- **GIVEN** direct Anthropic, LiteLLM, and local Ollama connections are configured
+- **WHEN** the user opens the model picker
+- **THEN** models SHALL be grouped under those three provider connections
+- **AND** the displayed provider SHALL describe the connection used for the request, not an inferred model brand
+- **AND** a Claude-named model routed through LiteLLM SHALL remain in the LiteLLM group
+
+#### Scenario: Provider model discovery succeeds
+
+- **GIVEN** a configured provider exposes a supported model-list operation
+- **WHEN** the server refreshes that provider
+- **THEN** the public catalog SHALL contain stable selectable profiles for its usable models
+- **AND** each profile SHALL identify whether it was configured or discovered
+- **AND** the catalog SHALL NOT contain credentials, request headers, credential-helper paths, or complete private endpoint URLs
+
+#### Scenario: One provider cannot be discovered
+
+- **GIVEN** one provider times out, rejects authentication, or returns a malformed model list
+- **WHEN** catalog refresh completes
+- **THEN** that provider SHALL have a fixed unavailable status and non-sensitive error code
+- **AND** configured profiles for that provider SHALL remain present
+- **AND** models from healthy providers SHALL remain selectable
+- **AND** no raw provider response SHALL be sent to the browser
+
+#### Scenario: A discovered model does not advertise tool support
+
+- **GIVEN** discovery reports a model with completion support but without tool capability
+- **WHEN** the picker displays it
+- **THEN** the model SHALL remain visible but disabled with a reason
+- **AND** a model whose tool capability cannot be established SHALL be marked unknown rather than guessed supported
+
+#### Scenario: A model disappears after a session used it
+
+- **GIVEN** a saved session names a stable model profile that is absent from the latest discovery result
+- **WHEN** the conversation is reopened
+- **THEN** its transcript and provider/model identity SHALL remain readable
+- **AND** the model SHALL be shown as unavailable
+- **AND** selecting a different available model SHALL create a new session without altering the old session
+
+#### Scenario: Refreshing the catalog
+
+- **GIVEN** the model picker is open and no turn or approval is active
+- **WHEN** the user requests a refresh
+- **THEN** discovery SHALL run with a bounded timeout independently for each configured provider
+- **AND** the picker SHALL replace its snapshot only with the newest completed refresh
+- **AND** the refresh request SHALL require the server-issued mutation token
 
 ### Requirement: Diagnostics are opt-in and never authoritative
 

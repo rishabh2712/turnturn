@@ -16,6 +16,7 @@ export interface StoredSession {
   readonly ordinal: number;
   readonly provider: string;
   readonly model: string;
+  readonly modelProfileId?: string;
   readonly createdAt: string;
 }
 
@@ -37,6 +38,7 @@ export interface ActivatedSession extends StoredSession {
 export interface ConversationStoreOptions {
   readonly provider: string;
   readonly model: string;
+  readonly modelProfileId?: string;
 }
 
 export class ConversationStore {
@@ -88,18 +90,26 @@ export class ConversationStore {
     return (await this.index.list()).filter((entry) => entry.archived === archived);
   }
 
-  async activate(conversationId: ConversationId): Promise<ActivatedSession> {
+  async activate(
+    conversationId: ConversationId,
+    selection: ConversationStoreOptions = this.config,
+  ): Promise<ActivatedSession> {
     const conversation = await this.require(conversationId);
     if (conversation.archived) throw new Error("Cannot activate an archived conversation");
     const latest = conversation.sessions.at(-1);
-    if (latest?.provider === this.config.provider && latest.model === this.config.model) {
+    if (
+      latest?.provider === selection.provider &&
+      latest.model === selection.model &&
+      latest.modelProfileId === selection.modelProfileId
+    ) {
       return { ...latest, isNewSession: false };
     }
     const session: StoredSession = {
       sessionId: formatSessionId(randomUUID()),
       ordinal: conversation.sessions.length + 1,
-      provider: this.config.provider,
-      model: this.config.model,
+      provider: selection.provider,
+      model: selection.model,
+      ...(selection.modelProfileId === undefined ? {} : { modelProfileId: selection.modelProfileId }),
       createdAt: new Date().toISOString(),
     };
     await mkdir(join(this.conversationDir(conversationId), "sessions"), { recursive: true });
@@ -216,6 +226,7 @@ function parseConversation(raw: unknown, expectedId: ConversationId, workspaceKe
       ordinal: index + 1,
       provider: item.provider,
       model: item.model,
+      ...(typeof item.modelProfileId === "string" ? { modelProfileId: item.modelProfileId } : {}),
       createdAt: item.createdAt,
     };
   });

@@ -40,6 +40,51 @@ test("getRuntime sends the token header and returns the parsed body", async (t) 
   assert.equal(runtime.provider, "openai-chat-completions");
 });
 
+test("listProviders reads the grouped provider catalog with GET", async (t) => {
+  let receivedMethod;
+  const { server, baseUrl } = await startFakeServer((req, res) => {
+    receivedMethod = req.method;
+    json(res, 200, {
+      connections: [
+        {
+          id: "ollama",
+          label: "Ollama",
+          locality: "local",
+          wire: "ollama",
+          status: "ok",
+          stale: false,
+          lastSuccessAt: null,
+          error: null,
+          models: [],
+        },
+      ],
+    });
+  });
+  t.after(() => server.close());
+
+  const transport = new HttpChatTransport({ baseUrl, token: "t" });
+  const catalog = await transport.listProviders();
+  assert.equal(receivedMethod, "GET");
+  assert.equal(catalog.connections[0].id, "ollama");
+});
+
+test("refreshProviders posts to the refresh route and returns the fresh catalog", async (t) => {
+  let receivedMethod;
+  let receivedPath;
+  const { server, baseUrl } = await startFakeServer((req, res) => {
+    receivedMethod = req.method;
+    receivedPath = req.url;
+    json(res, 200, { connections: [] });
+  });
+  t.after(() => server.close());
+
+  const transport = new HttpChatTransport({ baseUrl, token: "t" });
+  const catalog = await transport.refreshProviders();
+  assert.equal(receivedMethod, "POST");
+  assert.equal(receivedPath, "/api/providers/refresh");
+  assert.deepEqual(catalog, { connections: [] });
+});
+
 test("listConversations encodes query parameters", async (t) => {
   let receivedUrl;
   const { server, baseUrl } = await startFakeServer((req, res) => {
@@ -70,6 +115,27 @@ test("createConversation sends a JSON body with the content-type header", async 
   assert.match(receivedContentType, /application\/json/);
   assert.deepEqual(receivedBody, { workspaceKey: "ws_1", title: "Hi" });
   assert.equal(created.workspaceKey, "ws_1");
+});
+
+test("activateConversation sends the selected server-owned model profile", async (t) => {
+  let receivedBody;
+  const { server, baseUrl } = await startFakeServer((_req, res, body) => {
+    receivedBody = body;
+    json(res, 200, {
+      sessionId: "sess_1",
+      ordinal: 1,
+      provider: "anthropic-messages",
+      model: "claude-test",
+      modelProfileId: "anthropic",
+      isNewSession: true,
+    });
+  });
+  t.after(() => server.close());
+
+  const transport = new HttpChatTransport({ baseUrl, token: "t" });
+  const session = await transport.activateConversation("conv_1", { modelProfileId: "anthropic" });
+  assert.deepEqual(receivedBody, { modelProfileId: "anthropic" });
+  assert.equal(session.modelProfileId, "anthropic");
 });
 
 test("patchConversation unwraps the server's conversation envelope", async (t) => {

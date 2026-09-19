@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ModelCatalog } from "./model-catalog.js";
 import type { AssistantRuntime } from "./runtime.js";
 import { SessionRuntimeRegistry } from "./session-runtime.js";
 import { ConversationStore } from "./storage/conversation-store.js";
@@ -8,6 +9,7 @@ export interface PersistentRuntime {
   readonly state: StateDirectory;
   readonly store: ConversationStore;
   readonly sessions: SessionRuntimeRegistry;
+  readonly models: ModelCatalog;
   readonly serverInstanceId: string;
   close(): Promise<void>;
 }
@@ -22,13 +24,22 @@ export async function createPersistentRuntime(
     ...(options.port === undefined ? {} : { port: options.port }),
   });
   try {
+    const defaultProfile = runtime.models.defaultProfile;
     const store = await ConversationStore.open(state, {
-      provider: runtime.config.provider,
-      model: runtime.config.model,
+      provider: defaultProfile.provider,
+      model: defaultProfile.model,
+      modelProfileId: defaultProfile.id,
     });
     const sessions = new SessionRuntimeRegistry({
       store,
       provider: runtime.provider,
+      providerForSession: (session) => {
+        const profile = runtime.models.resolve(session);
+        return profile.id === runtime.models.defaultProfileId
+          ? runtime.provider
+          : runtime.models.createProvider(profile);
+      },
+      models: runtime.models,
       tools: runtime.tools,
       policy: runtime.policy,
       live: runtime.live,
@@ -46,6 +57,7 @@ export async function createPersistentRuntime(
       state,
       store,
       sessions,
+      models: runtime.models,
       serverInstanceId: `srv_${randomUUID()}`,
       close: () => {
         closing ??= sessions.waitForIdle().then(() => state.close());

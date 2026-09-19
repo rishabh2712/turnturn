@@ -173,6 +173,55 @@ test("runtime config omits credentials and file peek confines text and size", as
   }
 });
 
+test("model profiles are public without credentials and switching creates a session-bound provider", async () => {
+  const root = await mkdtemp(join(tmpdir(), "turnturn-api-model-test-"));
+  const harness = await start(root, undefined, {
+    modelProfiles: [
+      { id: "local", label: "Local", provider: "ollama", model: "local-model" },
+      {
+        id: "anthropic",
+        label: "Claude",
+        provider: "anthropic-messages",
+        model: "claude-test",
+        apiKey: "anthropic-secret",
+      },
+    ],
+    defaultModelProfileId: "local",
+  });
+  try {
+    const runtime = await harness.json("/api/runtime");
+    assert.equal(runtime.body.defaultModelProfileId, "local");
+    assert.deepEqual(runtime.body.models, [
+      { id: "local", label: "Local", provider: "ollama", model: "local-model" },
+      { id: "anthropic", label: "Claude", provider: "anthropic-messages", model: "claude-test" },
+    ]);
+    assert.doesNotMatch(JSON.stringify(runtime.body), /anthropic-secret/);
+
+    const created = await harness.json("/api/conversations", "POST", { workspaceKey: harness.workspaceKey });
+    const id = created.body.conversation.conversationId;
+    const local = await harness.json(`/api/conversations/${id}/activate`, "POST", { modelProfileId: "local" });
+    const anthropic = await harness.json(`/api/conversations/${id}/activate`, "POST", {
+      modelProfileId: "anthropic",
+    });
+    assert.notEqual(anthropic.body.sessionId, local.body.sessionId);
+    assert.equal(anthropic.body.provider, "anthropic-messages");
+    assert.equal(anthropic.body.modelProfileId, "anthropic");
+    const reused = await harness.json(`/api/conversations/${id}/activate`, "POST", {
+      modelProfileId: "anthropic",
+    });
+    assert.equal(reused.body.sessionId, anthropic.body.sessionId);
+    assert.equal(reused.body.isNewSession, false);
+    const missing = await harness.json(`/api/conversations/${id}/activate`, "POST", {
+      modelProfileId: "missing",
+    });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.error.code, "MODEL_PROFILE_NOT_FOUND");
+  } finally {
+    await harness.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("trace API scopes bundles to their session, follows growth, and loads referenced payloads lazily", async () => {
   const root = await mkdtemp(join(tmpdir(), "turnturn-api-trace-test-"));
   const harness = await start(root);

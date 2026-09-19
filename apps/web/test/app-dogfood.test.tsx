@@ -40,6 +40,11 @@ test("the first browser conversation sends a turn and renders streamed assistant
       workspace: { key: "ws", path: "/workspace", name: "workspace" },
       provider: "ollama",
       model: "local-model",
+      defaultModelProfileId: "local",
+      models: [
+        { id: "local", label: "Local model", provider: "ollama", model: "local-model" },
+        { id: "anthropic", label: "Claude", provider: "anthropic-messages", model: "claude-test" },
+      ],
       baseUrlHost: null,
       maxTokens: null,
       serverInstanceId: "server",
@@ -47,6 +52,51 @@ test("the first browser conversation sends a turn and renders streamed assistant
       schemaVersion: 1,
       tools: [],
     })),
+    listProviders: vi.fn(async () => ({
+      connections: [
+        {
+          id: "ollama",
+          label: "Ollama",
+          locality: "local",
+          wire: "ollama",
+          status: "idle",
+          stale: false,
+          lastSuccessAt: null,
+          error: null,
+          models: [
+            {
+              id: "local",
+              label: "Local model",
+              model: "local-model",
+              source: "configured",
+              toolCompatibility: "supported",
+              available: true,
+            },
+          ],
+        },
+        {
+          id: "anthropic-messages",
+          label: "Anthropic",
+          locality: "remote",
+          wire: "anthropic-messages",
+          status: "idle",
+          stale: false,
+          lastSuccessAt: null,
+          error: null,
+          models: [
+            {
+              id: "anthropic",
+              label: "Claude",
+              model: "claude-test",
+              source: "configured",
+              toolCompatibility: "supported",
+              available: true,
+            },
+          ],
+        },
+      ],
+    })),
+    refreshProviders: vi.fn(async () => ({ connections: [] })),
     listConversations: vi.fn(async ({ archived = false } = {}) => ({
       conversations: created && !archived ? [summary] : [],
       nextCursor: null,
@@ -56,11 +106,12 @@ test("the first browser conversation sends a turn and renders streamed assistant
       return summary;
     }),
     getConversation: vi.fn(async () => ({ conversation: summary, sessions: [] })),
-    activateConversation: vi.fn(async () => ({
+    activateConversation: vi.fn(async (_conversationId, params) => ({
       sessionId,
       ordinal: 1,
-      provider: "ollama",
-      model: "local-model",
+      provider: params?.modelProfileId === "anthropic" ? "anthropic-messages" : "ollama",
+      model: params?.modelProfileId === "anthropic" ? "claude-test" : "local-model",
+      modelProfileId: params?.modelProfileId ?? "local",
       isNewSession: true,
     })),
     submitCommand: vi.fn(async () => ({ kind: "accepted" as const })),
@@ -82,9 +133,13 @@ test("the first browser conversation sends a turn and renders streamed assistant
   expect(screen.queryByText("Protocol timeline")).toBeNull();
   expect(screen.queryByText("Initialize")).toBeNull();
 
+  fireEvent.click(screen.getByRole("button", { name: /Local model/i }));
+  await screen.findByRole("option", { name: /Claude/i });
+  fireEvent.click(screen.getByRole("option", { name: /Claude/i }));
   fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Hello local model" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await waitFor(() => expect(transport.submitCommand).toHaveBeenCalledTimes(1));
+  expect(transport.activateConversation).toHaveBeenCalledWith(conversationId, { modelProfileId: "anthropic" });
   await screen.findByText("Hello local model");
   await waitFor(() => expect(handlers).toBeDefined());
 

@@ -2,9 +2,9 @@
 
 Milestone 3.5. Motivation is in `proposal.md`; requirements are in `specs/`; scope and exit criteria are in `ROADMAP.md`. This file holds decisions.
 
-Status: **reviewed for implementation on 2026-09-14.** Rishabh asked to start after the proposed defaults were stated. Questions 1 and 2 take their defaults; question 3 remains an archive-time choice; question 4 defers exact provider-request diagnostics from this milestone.
+Status: **reviewed for implementation on 2026-09-14; D30 amendment pending review.** Rishabh asked to start the original workspace after the proposed defaults were stated. Questions 1 and 2 take their defaults; question 3 remains an archive-time choice; question 4 defers exact provider-request diagnostics from this milestone. D30 is a later design amendment for dynamic provider/model discovery and must be reviewed before 5.4c implementation starts.
 
-**Gate tier: standard.** This milestone does not alter a public package API. An exact provider-request diagnostic would need an observer in the exported adapter options, which would change to the full gate; it is deferred. See Decisions 22 and 25.
+**Gate tier: standard for the original workspace; full for D30.** D30 adds public HTTP and client-transport methods, so its neutral challenge and synthesis are required. An exact provider-request diagnostic would need an observer in the exported adapter options, which remains deferred. See Decisions 22 and 25.
 
 ---
 
@@ -781,7 +781,7 @@ Convention: `node --test` on `.mjs` against built `dist` for `packages/*`. `apps
 - **No virtualization** (D20) → very long conversations page rather than scroll continuously. Reversible; the item list is already the right shape.
 - **Vitest in `apps/web`** → two test runners in the repo. Confined to the one package where `node --test` cannot work, and the projector — the part with real logic — stays on the repo convention.
 - **`POST /commands` no longer returns a turn's records** (D7) → the client's optimistic user message is the only immediate feedback until SSE delivers `turn.started`. Acceptable, and it is what makes long turns survivable.
-- **No in-app model switching** → changing the model means editing `.env.local` and restarting, after which the conversation continues in a new session with empty history, visibly. Correct for now: carrying history across a provider change is Milestone 5's problem.
+- **Model switching starts a new session** → the browser selects only from server-owned profiles; it never supplies an endpoint or credential. A switch is refused while the conversation is busy and creates a visibly separate session with empty model history. Carrying context across that boundary remains Milestone 5's problem.
 - **Retry and continue links are ephemeral** → after a refresh they read as two ordinary user messages. A durable link would be a protocol change.
 - **A token in the `/events` query string** (D23) → it would appear in a request log. There is no request log; noted so that adding one has to deal with it.
 - **The server-side `stepId` and `shell` fixes touch `assistant-core`** (T0) → a milestone that is mostly client work edits the engine. Each is small, each is a defect against an existing written decision, and every one of them blocks a client-side correctness property.
@@ -817,3 +817,44 @@ Convention: `node --test` on `.mjs` against built `dist` for `packages/*`. `apps
 4. **Resolved for this milestone: defer exact provider-request diagnostics.** The normal chat UI does not need the wire JSON, and duplicating the adapter's request builder in the server would drift. A future optional body-only observer on exported adapter options requires the full contract-altering design ritual. No approximate request body is labeled exact and no provider-request endpoint ships now.
 
 Deliberately *not* left open, because each would change the specs or the task breakdown and is decided above: storage engine (D1), where `conversation.created` lives (D2), engine granularity (D3), who owns durable identity (D6), whether `POST /commands` awaits a turn (D7), Markdown renderer (D17), and whether to virtualize (D20).
+### D27 — Semantic facts compose into turns before React renders them
+
+`ConversationView.items` remains the correctness-oriented semantic projection described by D14. A second pure projection in `chat-client` composes those items into `TurnPresentation` and `AgentStepPresentation`: one user request, its ordered provider steps, the tool actions caused by each step, a final response, and one turn outcome. React consumes this presentation model and never groups protocol records itself.
+
+### D28 — Model selection is server-owned and session-bound
+
+The server exposes a public catalog containing only profile id, label, wire adapter, and model. Credentials, headers, and full endpoint configuration remain private server state. The browser activates a conversation with a profile id; it cannot submit arbitrary provider configuration.
+
+Each saved session records the selected profile identity together with provider and model. Reopening a session reconstructs its provider from those saved facts instead of using the current process default. Changing profiles creates a new session, is unavailable while a turn or approval is active, and never mutates an in-flight engine. Earlier transcript stays visible, but earlier history is not sent to the new provider.
+
+### D29 — Provider credentials enter through a startup-only helper
+
+Direct environment variables remain backward compatible, but the preferred local path is macOS Keychain. When an Anthropic profile exists and no direct key is present, server startup reads the conventional Keychain item through `/usr/bin/security`; a one-time setup script lets `security` prompt for the value without the shell or repository reading it. An absolute `ANTHROPIC_API_KEY_HELPER` executable can replace Keychain for another secret manager.
+
+The helper runs only at startup, its stdout is bounded and must contain exactly one non-empty line, and failures are replaced with a fixed message so helper stderr cannot leak into logs. The resolved value exists only in server memory and is excluded from runtime responses, traces, model profiles sent to React, and startup output.
+
+### D30 — Provider connections discover models; the browser receives a safe catalog
+
+`provider`, `wire adapter`, and `model` are separate identities. A provider connection answers “which configured account or local runtime receives this request”; a wire adapter answers “which HTTP request and stream grammar do we speak”; a model answers “which provider-visible model id is requested.” A LiteLLM connection may therefore expose Claude, Gemini, and GPT model names while every one of those profiles still uses the `openai-chat-completions` wire. Model brand never selects the adapter.
+
+The server owns a `ProviderRegistry` of configured connections. Each connection has a stable id and display label, private endpoint and credential material, one wire adapter factory, and an optional model discoverer. The registry produces a public catalog snapshot; it never serializes credentials, request headers, helper paths, complete endpoint URLs, or raw provider errors. `ModelCatalog` remains the session-facing lookup of stable model profiles, but adapter construction moves behind the connection that owns the profile instead of remaining a switch over provider kinds.
+
+Discovery is provider-specific rather than inferred from a common response shape:
+
+- direct Anthropic lists models through `GET /v1/models` using the already resolved startup credential;
+- a LiteLLM connection lists the models visible to that key through its authenticated `GET /v1/models`; those entries describe LiteLLM routing names, not native upstream wire truth;
+- Ollama lists installed models through `GET /api/tags`, then uses `POST /api/show` when capability metadata is needed. Models without `completion` are not selectable; lack of declared `tools` is shown as an explicit compatibility warning rather than silently treated as support.
+
+A discovery response proves that an id is visible to that connection. It does not prove model quality, upstream brand, context size, or tool-call correctness. Manually configured profiles remain authoritative and are merged ahead of discovered entries. Static profiles therefore keep the server usable when discovery is absent, forbidden, malformed, or temporarily unavailable.
+
+Refresh is bounded, parallel per connection, and last-started-wins. One provider timing out or rejecting discovery changes only that provider to `unavailable`; it does not prevent server startup, remove configured profiles, or disable other providers. Raw status bodies are not exposed. The public state uses fixed status and error codes, and retains the last successful discovery result in memory while reporting that it is stale. There is no new on-disk cache in this change.
+
+The public API is `GET /api/providers`, plus token-protected `POST /api/providers/refresh`. It returns provider groups with connection id, display label, locality, connection state, refresh metadata, and model options containing only stable profile id, provider-visible model id, display label, availability, source (`configured` or `discovered`), and tool compatibility (`supported`, `unsupported`, or `unknown`). `/api/runtime.models` remains during this change as a compatibility projection of the same catalog; it is not a second source of truth.
+
+The picker groups by provider connection and displays connection and compatibility state. Search matches provider label, model label, and exact model id. Unsupported entries are visible but disabled with a reason; an unknown tool capability is selectable with a warning. Refresh is explicit. Selecting a profile still follows D28: it is refused while work is active and activates a new session rather than mutating the current engine.
+
+Profile ids are deterministic from the stable connection id and provider-visible model id. Reopening a saved session may reconstruct its private adapter from those persisted facts even when that model is absent from the latest discovery snapshot; it remains visible as unavailable and a new turn fails before provider invocation with a structured model-unavailable error. A disappearing catalog entry never makes an old transcript unreadable.
+
+Tool presentation is schema-aware. Known tools map to typed read, write, edit, search, paths, and shell presentations; unknown tools retain a JSON fallback. Shell interpretation is conservative and display-only: only unambiguous recognized command shapes receive semantic labels, while every other command is presented as “Run command” with its exact text available. Interpretation never affects policy, approval, or execution.
+
+Stable identity remains protocol-derived: turns by `turnId`, steps by `stepId`, and actions by `toolCallId`. A pending approval is owned by its tool action and referenced once at turn level for navigation and composer state. The default UI exposes lifecycle status, not private model reasoning. Raw payloads remain progressively disclosed through details and the trace inspector.

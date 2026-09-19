@@ -18,8 +18,9 @@ import {
   type SessionId,
 } from "@turnturn/protocol";
 import { RuntimeClock, RuntimeIds } from "./ids.js";
+import type { ModelCatalog } from "./model-catalog.js";
 import { TraceObservationPort, traceRootForSessionLog } from "./observability/index.js";
-import type { ConversationStore } from "./storage/conversation-store.js";
+import type { ConversationStore, StoredSession } from "./storage/conversation-store.js";
 import { JsonlSessionDurableSink } from "./storage/session-sink.js";
 
 export interface SessionRuntime {
@@ -27,6 +28,7 @@ export interface SessionRuntime {
   readonly sessionId: SessionId;
   readonly durable: JsonlSessionDurableSink;
   readonly engine: AssistantEngine;
+  readonly modelProfileId?: string;
   readonly observation?: TraceObservationPort;
 }
 
@@ -39,6 +41,9 @@ export interface SessionTraceOptions {
 export interface SessionRuntimeRegistryOptions {
   readonly store: ConversationStore;
   readonly provider: ProviderPort;
+  readonly providerForSession?: (session: StoredSession) => ProviderPort;
+  /** Checked before every `turn.submit` (D30): an unavailable model is rejected before engine/provider invocation. */
+  readonly models?: ModelCatalog;
   readonly tools: ToolExecutorPort;
   readonly policy: ToolPolicyPort;
   readonly live: LiveSink;
@@ -103,6 +108,21 @@ export class SessionRuntimeRegistry {
     if (entry === undefined) throw new Error("SESSION_NOT_FOUND");
     entry.activeCommands += 1;
     try {
+      // D30: a model that has disappeared from discovery is rejected before the
+      // engine (and therefore before any provider network call) ever sees the
+      // command. Reading records is unaffected — this check only guards new work.
+      if (
+        command.type === CommandTypes.TurnSubmit &&
+        runtime.modelProfileId !== undefined &&
+        this.options.models !== undefined &&
+        !this.options.models.isAvailable(runtime.modelProfileId)
+      ) {
+        return {
+          kind: "rejected",
+          code: "MODEL_PROFILE_UNAVAILABLE",
+          message: `Model profile ${runtime.modelProfileId} is no longer available`,
+        };
+      }
       const outcome = await runtime.engine.submit(command);
       await runtime.observation?.flush();
       return outcome;
@@ -167,7 +187,7 @@ export class SessionRuntimeRegistry {
         })
       : undefined;
     const engine = createAssistantEngine({
-      provider: this.options.provider,
+      provider: this.options.providerForSession?.(session) ?? this.options.provider,
       tools: this.options.tools,
       policy: this.options.policy,
       durable,
@@ -182,7 +202,14 @@ export class SessionRuntimeRegistry {
         this.createCommand(CommandTypes.SessionCreate, conversationId, sessionId, { provider: session.provider }),
       );
     }
-    return { conversationId, sessionId, durable, engine, ...(observation === undefined ? {} : { observation }) };
+    return {
+      conversationId,
+      sessionId,
+      durable,
+      engine,
+      ...(session.modelProfileId === undefined ? {} : { modelProfileId: session.modelProfileId }),
+      ...(observation === undefined ? {} : { observation }),
+    };
   }
 
   private createCommand<T extends CommandTypes.ConversationCreate | CommandTypes.SessionCreate>(
