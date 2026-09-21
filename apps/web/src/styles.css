@@ -254,14 +254,39 @@ summary:focus-visible {
   color: #933a2b;
   font-size: 13px;
 }
+.tt-viewport-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
 .tt-transcript {
   width: 100%;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 22px;
   padding: 32px max(28px, calc((100% - 850px) / 2));
+}
+.tt-jump-to-latest {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid #d8d4c8;
+  border-radius: 999px;
+  background: #1f1c16;
+  color: #f6f4ee;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(20, 18, 12, 0.22);
+}
+.tt-jump-to-latest:hover {
+  background: #33302a;
 }
 .tt-message {
   max-width: 100%;
@@ -862,4 +887,234 @@ summary:focus-visible {
   .tt-inspector {
     width: 100vw;
   }
+}
+
+/*
+ * Markdown message body (T6 6.2). Scoped to `.tt-markdown` only. Placed last
+ * so `.tt-markdown li > p`, at specificity (0,1,2), never trips a
+ * descending-specificity lint warning against an unrelated earlier `p`
+ * selector.
+ */
+.tt-markdown {
+  line-height: 1.5;
+}
+.tt-markdown > :first-child {
+  margin-top: 0;
+}
+.tt-markdown > :last-child {
+  margin-bottom: 0;
+}
+.tt-markdown ul,
+.tt-markdown ol {
+  margin: 0.4em 0;
+  padding-left: 1.6em;
+}
+.tt-markdown ul {
+  list-style: disc outside;
+}
+.tt-markdown ol {
+  list-style: decimal outside;
+}
+.tt-markdown ul ul,
+.tt-markdown ol ul {
+  list-style-type: circle;
+}
+.tt-markdown li {
+  margin: 0.15em 0;
+  padding-left: 0.1em;
+}
+.tt-markdown li > p {
+  display: inline;
+  margin: 0;
+}
+.tt-markdown li > p + p {
+  display: block;
+  margin-top: 0.4em;
+}
+.tt-markdown li + li {
+  margin-top: 0.15em;
+}
+.tt-markdown h1,
+.tt-markdown h2,
+.tt-markdown h3,
+.tt-markdown h4 {
+  margin: 1.1em 0 0.45em;
+  line-height: 1.25;
+  color: #24231f;
+}
+.tt-markdown h1 {
+  font-size: 1.45em;
+}
+.tt-markdown h2 {
+  font-size: 1.25em;
+}
+.tt-markdown h3,
+.tt-markdown h4 {
+  font-size: 1.08em;
+}
+.tt-markdown blockquote {
+  margin: 0.8em 0;
+  border-left: 3px solid #d8d4c8;
+  padding-left: 0.9em;
+  color: #666159;
+}
+.tt-markdown table {
+  width: 100%;
+  margin: 0.9em 0;
+  border-collapse: collapse;
+  font-size: 0.94em;
+}
+.tt-markdown th,
+.tt-markdown td {
+  border: 1px solid #dedbd2;
+  padding: 0.45em 0.65em;
+  text-align: left;
+  vertical-align: top;
+}
+.tt-markdown th {
+  background: #f4f2ec;
+  font-weight: 650;
+}
+.tt-markdown :not(pre) > code {
+  border: 1px solid #e1ded5;
+  border-radius: 4px;
+  padding: 0.08em 0.3em;
+  background: #f3f1eb;
+  color: #8b3f31;
+  font:
+    0.92em ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.tt-code-block {
+  margin: 0.85em 0;
+  overflow: hidden;
+  border: 1px solid #34332f;
+  border-radius: 9px;
+  background: #242423;
+  color: #f0eee8;
+}
+.tt-code-block-toolbar {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #3b3a36;
+  padding: 0 10px 0 12px;
+  background: #2c2b28;
+}
+.tt-code-block-language {
+  overflow: hidden;
+  color: #bbb7ac;
+  font:
+    10px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.tt-code-copy {
+  border: 0;
+  padding: 4px 6px;
+  background: transparent;
+  color: #d5d1c6;
+  cursor: pointer;
+  font-size: 11px;
+}
+.tt-code-copy:hover,
+.tt-code-copy:focus-visible {
+  color: #fff;
+}
+.tt-code-block pre,
+.tt-shiki-body pre {
+  max-width: 100%;
+  overflow: auto;
+  margin: 0;
+  padding: 13px 14px;
+  background: transparent;
+  font:
+    12px / 1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  tab-size: 2;
+}
+.tt-code-block pre code {
+  font: inherit;
+  white-space: pre;
+}
+.tt-shiki-body .shiki {
+  background: transparent;
+}
+
+/* File reference peek panel (T6 6.6, D19). */
+.tt-file-peek-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 20, 18, 0.35);
+}
+.tt-file-peek-backdrop-button {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+}
+.tt-file-peek {
+  position: relative;
+  z-index: 1;
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+.tt-file-peek-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #ecece8;
+}
+.tt-file-peek-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.tt-file-peek-actions {
+  display: flex;
+  gap: 8px;
+}
+.tt-file-peek-body {
+  overflow: auto;
+  padding: 8px 0;
+}
+.tt-file-peek-body pre {
+  margin: 0;
+  font-size: 12px;
+}
+.tt-file-peek-line {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+}
+.tt-file-peek-lineno {
+  color: #9a9a94;
+  min-width: 3ch;
+  text-align: right;
+  user-select: none;
 }

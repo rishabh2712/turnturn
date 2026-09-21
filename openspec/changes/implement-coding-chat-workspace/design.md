@@ -2,9 +2,9 @@
 
 Milestone 3.5. Motivation is in `proposal.md`; requirements are in `specs/`; scope and exit criteria are in `ROADMAP.md`. This file holds decisions.
 
-Status: **reviewed for implementation on 2026-09-14; D30 amendment pending review.** Rishabh asked to start the original workspace after the proposed defaults were stated. Questions 1 and 2 take their defaults; question 3 remains an archive-time choice; question 4 defers exact provider-request diagnostics from this milestone. D30 is a later design amendment for dynamic provider/model discovery and must be reviewed before 5.4c implementation starts.
+Status: **reviewed for implementation on 2026-09-14; D30 approved by Rishabh on 2026-09-19; D31, D32, and D33 amendments pending review.** Rishabh asked to start the original workspace after the proposed defaults were stated. Questions 1 and 2 take their defaults; question 3 remains an archive-time choice; question 4 defers exact provider-request diagnostics from this milestone. D31 is a later design amendment for a persistently visible approval affordance, D32 for the visual appearance of streaming text, and D33 for frontend responsibility boundaries; each must be reviewed before its implementation task starts. The RF1–RF5 defect repairs only restore already-approved D17/D19/D20/D21 behavior and do not depend on D31–D33 approval.
 
-**Gate tier: standard for the original workspace; full for D30.** D30 adds public HTTP and client-transport methods, so its neutral challenge and synthesis are required. An exact provider-request diagnostic would need an observer in the exported adapter options, which remains deferred. See Decisions 22 and 25.
+**Gate tier: standard for the original workspace; full for D30.** D30 adds public HTTP and client-transport methods, so its neutral challenge and synthesis are required. An exact provider-request diagnostic would need an observer in the exported adapter options, which remains deferred. See Decisions 22 and 25. D31 changes only client presentation of an existing durable fact (`ApprovalView`) and adds no new wire surface, so it takes the standard gate tier. D32 is a CSS-only presentation change with no wire surface at all, also standard tier.
 
 ---
 
@@ -648,11 +648,11 @@ GET /events?conversationId=…&token=…
      ├─ <Sidebar>                workspace group · New conversation · list · footer (settings, dev)
      ├─ <MainColumn>
      │   ├─ <ConversationHeader> inline-editable title · workspace chip · model chip · phase · menu
+     │   ├─ <PendingApprovalBar> fixed above the transcript; mounted always, renders nothing when idle (D31)
      │   ├─ <ConversationViewport>
      │   │   ├─ <LoadEarlier>            (D20)
      │   │   ├─ <UserMessage> <AssistantMessage> <ToolActivityCard>
      │   │   ├─ <ApprovalCard> <TurnStatus> <SessionDivider>
-     │   │   ├─ <ApprovalBanner>         when a pending approval is off screen
      │   │   └─ <JumpToLatest>
      │   └─ <Composer>           textarea · Send/Stop · phase line · workspace+model footer
      └─ <DeveloperDrawer>        only when dev mode is on                          (D22)
@@ -685,7 +685,7 @@ GET /events?conversationId=…&token=…
 
 **Retry and continue.** Retry appears on a failed turn whose `SerializedError.retryable` is true, and submits a **new** turn with the same text and a fresh `turnId`; it never reopens the failed turn, because a terminal turn does not resurrect. Continue appears when a turn ended with `stopReason` `"output-limit"`, or aborted, and submits a new turn asking to continue. Both are marked in ephemeral local state only — the protocol has no field for "this retries that", so after a refresh they read as two ordinary user messages. Honest and cheap; a durable link would be a protocol change.
 
-**Scrolling.** Pinned while within 48px of the bottom. A user scroll away unpins and reveals a "Jump to latest" pill carrying a count of items that arrived since. Clicking it scrolls and re-pins. The viewport is never moved while unpinned — including for an arriving approval, which instead raises the off-screen approval banner.
+**Scrolling.** Pinned while within 48px of the bottom. A user scroll away unpins and reveals a "Jump to latest" pill carrying a count of items that arrived since. Clicking it scrolls and re-pins. The viewport is never moved while unpinned — including for an arriving approval, which instead is surfaced by the always-mounted pinned approval bar (D31) rather than by moving anything.
 
 ### Error and recovery behaviour
 
@@ -833,6 +833,44 @@ Direct environment variables remain backward compatible, but the preferred local
 
 The helper runs only at startup, its stdout is bounded and must contain exactly one non-empty line, and failures are replaced with a fixed message so helper stderr cannot leak into logs. The resolved value exists only in server memory and is excluded from runtime responses, traces, model profiles sent to React, and startup output.
 
+### D31 — A pending approval is pinned above the transcript, not only flagged when scrolled away
+
+D16 places a pending approval inline at the transcript position where it happened, and — per the original "Scrolling" decision — raises an off-screen banner only once that card has scrolled out of view. Dogfooding surfaced that this is too easy to miss: a reader who has not yet scrolled away from a card that arrived below the fold, or who is mid-read elsewhere in a long transcript, gets no signal until they happen to scroll past the point of no return. Claude Code and Codex both keep a blocking action request pinned regardless of scroll position; turnturn should too.
+
+**Decision.** A pending approval renders in two places at once, unconditionally, for as long as it is pending:
+
+1. **The inline card (D16, unchanged).** Same position, same full detail — command, working directory, Allow/Deny. This is what preserves "resolved in place without losing context" and remains the only place approval detail lives.
+2. **A pinned approval bar**, fixed at the top of `<ConversationViewport>` (below `<ConversationHeader>`, above the scrollable transcript), present whenever the active session's `ConversationView` carries a pending `ApprovalView` — independent of whether the inline card is currently visible. It shows one line (`Approval needed — <tool verb> <short target>`, using the same headline vocabulary as D15's group summaries), Allow and Deny controls, and a "View" control.
+
+Both surfaces read the same `ApprovalView` from the store and both submit the same `approval.resolve`; there is no separate local state to reconcile between them. Resolving from either place disables both immediately (existing in-flight behavior from 9.2 extends to the bar). "View" scrolls the viewport to the inline card and highlights it briefly — the same motion the old off-screen banner performed — and this scroll counts as a user-directed jump, which re-pins the viewport at the destination exactly as clicking "Jump to latest" does (D-unnamed "Scrolling" decision, task 8.5).
+
+**The old off-screen banner is retired.** Its job — surfacing an approval the reader has scrolled past — is now always done by the pinned bar, so a second, conditional mechanism for the same fact would be one fact with two homes. `<ApprovalBanner>` is removed from the component hierarchy; `<PendingApprovalBar>` takes its place, always mounted, rendering nothing when there is no pending approval.
+
+**At most one pending approval exists per session at a time.** `ToolWaveRunner.run` awaits each tool call in a wave sequentially (verified in `tool-wave-runner.ts`), so the store's pending-approval slot is `ApprovalView | undefined`, never a collection. No queueing or stacking design is needed; if this ever changes it is a new decision, not an extension of this one.
+
+**Interaction with the pin/jump-to-latest mechanism (task 8.5, already specified, not yet built).** The pinned bar's own appearance and disappearance never move the viewport and never change pinned/unpinned state — it occupies fixed layout space above the scroll area, the same way the header does. The two affordances are visually distinct and can coexist: the approval bar is a fixed top bar, the "Jump to latest" pill floats near the bottom of the viewport. A reader can be unpinned (reading scrollback) with both a "12 new" pill at the bottom and an approval bar at the top at once; neither one auto-scrolls on its own.
+
+**Keyboard and accessibility.** `Escape` still never resolves an approval (D16) — from the bar or the card. The bar is `role="status"` with `aria-live="assertive"`, distinct from the streaming region's `aria-live="polite"` (D-unnamed accessibility notes, T11 12.1): an unresolved approval blocks the turn, which is a stronger claim on attention than streaming text. It sits in tab order immediately after the header and before the transcript, so keyboard users reach it without traversing scrollback.
+
+**Rejected: replace the inline card with only the pinned bar.** Rejected for the same reason D16 gives for placing the card inline in the first place — the surrounding conversation is what lets the reader judge the request, and a bar has no room for it. Keeping both, with the bar as an unmissable fast path and the card as the detailed one, satisfies both concerns rather than trading one for the other.
+
+**Non-goals.** No change to approval resolution semantics, scopes, or the server; no change to `ApprovalView`'s shape; no persistence of "did the reader see the bar." Multiple simultaneous approvals are out of scope per the sequential-wave argument above.
+
+### D32 — Streaming assistant text has a soft, incremental appearance
+
+D17 specifies *what* renders (Markdown, sanitized, Shiki-highlighted, fence-safe while streaming). It says nothing about *how new text visually arrives* — today a `content.delta` simply appends characters to the DOM with no transition, which reads as mechanical rather than calm, next to Claude Code's and Codex's softer reveal.
+
+**Decision.** Newly arrived streamed text gets a brief, subtle opacity/blur-in transition as it is appended, rather than appearing instantly at full opacity. Scope:
+
+- Applies only to the **live, in-progress assistant message** for the turn currently streaming. The moment `assistant.message.completed` lands and the durable message supersedes the live text (existing reconciliation, D-unnamed "Durable ↔ live reconciliation"), it renders at full opacity immediately — no replay of the animation on durable content, ever. This keeps D17's "no duplicate assistant text" and this repo's key-stability invariants untouched: the animation is a CSS transition on newly appended nodes, not a new kind of item, not new state in the projector, and not something `chat-client` knows about at all.
+- Granularity is **per rendered chunk as delivered by the transport**, not per character and not re-segmented into words — introducing a client-side re-chunking scheme (e.g. splitting a delta into words to animate each one) would add timing state with no protocol backing and would fight the "auto-close unterminated fence" and Shiki-skip-while-streaming logic in D17. The existing delta boundaries are the only boundaries this decision uses.
+- Implementation is CSS-only (`opacity`/`filter` transition on the trailing appended span, ~120–180ms), gated behind `prefers-reduced-motion: reduce` per the accessibility requirement already listed in T11 (12.1) — reduced motion renders text at full opacity with no transition, not a longer or different one.
+- Explicitly **not** in scope: animating tool cards, approval cards, turn status changes, or any non-text item; changing streaming throughput or buffering; a "typewriter" character-by-character reveal (adds latency-shaped state for a purely cosmetic effect and was rejected for that reason); persisting or configuring the effect per user.
+
+**Rejected: word-by-word re-chunking with staggered reveal.** This is what a "typewriter" effect usually means and is closer to what the user described as "soft appearance." It was rejected because it requires buffering and re-timing text the provider already streamed at its own pace, which risks the exact flicker/duplication class D17's streaming section was written to avoid, for a cosmetic gain a plain fade-in mostly achieves already. If the fade-in alone reads as insufficient after dogfooding, revisit as its own decision rather than smuggling timing logic into this one.
+
+**Non-goals.** No change to `chat-client`, the projector, or any durable/live record shape. No change to Markdown parsing, sanitization, or Shiki (D17 unchanged). Purely a CSS transition in `apps/web`'s message rendering.
+
 ### D30 — Provider connections discover models; the browser receives a safe catalog
 
 `provider`, `wire adapter`, and `model` are separate identities. A provider connection answers “which configured account or local runtime receives this request”; a wire adapter answers “which HTTP request and stream grammar do we speak”; a model answers “which provider-visible model id is requested.” A LiteLLM connection may therefore expose Claude, Gemini, and GPT model names while every one of those profiles still uses the `openai-chat-completions` wire. Model brand never selects the adapter.
@@ -858,3 +896,38 @@ Profile ids are deterministic from the stable connection id and provider-visible
 Tool presentation is schema-aware. Known tools map to typed read, write, edit, search, paths, and shell presentations; unknown tools retain a JSON fallback. Shell interpretation is conservative and display-only: only unambiguous recognized command shapes receive semantic labels, while every other command is presented as “Run command” with its exact text available. Interpretation never affects policy, approval, or execution.
 
 Stable identity remains protocol-derived: turns by `turnId`, steps by `stepId`, and actions by `toolCallId`. A pending approval is owned by its tool action and referenced once at turn level for navigation and composer state. The default UI exposes lifecycle status, not private model reasoning. Raw payloads remain progressively disclosed through details and the trace inspector.
+
+### D33 — Frontend responsibility follows state, orchestration, and view boundaries
+
+The number or size of React components is not the maintainability rule. The rule is that each layer answers one kind of question, and dependencies point in one direction:
+
+```text
+server events and HTTP
+  -> ChatTransport
+  -> chat-client store + semantic/presentation projection
+  -> feature controller hook
+  -> screen composition
+  -> pure view components
+```
+
+This follows the useful part of Vercel AI SDK UI's architecture: a transport owns communication, a stateful chat object owns conversation state, a thin framework hook subscribes and exposes actions, and rendering consumes typed UI parts. Turnturn already has the first three equivalents (`ChatTransport`, `ConversationStore`, and `ConversationPresentation`); React must not rebuild them inside `App.tsx`. No Vercel package is added—the reference is the responsibility split, not its message contract.
+
+Open WebUI demonstrates the opposite pressure: its top-level `Chat.svelte` owns API calls, socket subscriptions, stores, message conversion, tool resolution, navigation, and rendering in one multi-thousand-line component. Turnturn may borrow its breadth of purpose-built child surfaces, but not its central chat component as an architectural model.
+
+**The five frontend responsibilities are:**
+
+| Layer | Owns | Must not own |
+| --- | --- | --- |
+| `packages/chat-client` | durable/live reconciliation, semantic projection, turn/tool presentation, transport interface | React, DOM, browser globals |
+| `apps/web/src/providers` | application-lifetime dependencies and shared resources: transport, runtime, conversation list | transcript interpretation or visual markup beyond the provider boundary |
+| `apps/web/src/features/*` | one feature's orchestration hook/controller: subscriptions, async actions, ephemeral request state, mapping presentation facts into view props | durable protocol interpretation, direct `fetch`, generic visual primitives |
+| `apps/web/src/screens/*` | page composition and layout between features | server calls, record/event branching, provider-specific logic |
+| `apps/web/src/components/*` and `lib/*` | pure reusable views and pure algorithms | transport access, global stores, durable records, cross-feature workflow state |
+
+`App.tsx` becomes only the application root: install providers, choose the current screen, and render the shell. `ConversationPane` becomes `features/conversation/useConversationController.ts` plus `screens/ConversationScreen.tsx`; the controller owns loading/resume, submit, approval, model switching, and trace selection, while the screen composes header, viewport, composer, and overlays from its returned model. `useProviderCatalog` moves beside the model-picker feature. File preview loading moves beside the file-preview feature and uses `ChatTransport.getWorkspaceFile`; `FilePeekPanel` receives state and callbacks and performs no network request.
+
+**State has one owner:** durable/live conversation meaning belongs to `ConversationStore`; server resource state belongs to its provider/controller; ephemeral visual state such as an open popover or copied indicator stays in its component. The same fact is never copied into a second `useState` merely to make a component convenient. Derived labels and groupings are pure functions or presentation models, not effects.
+
+**Views receive capabilities, not infrastructure.** A leaf may receive `onApprove`, `onOpenFile`, or `onRefresh`; it does not receive `ChatTransport`, construct an API URL, or call `fetch`. A feature controller may use the transport and store, but does not interpret `DurableRecord` or `LiveEvent`; that remains in `chat-client`. This preserves D21's future `IpcChatTransport` substitution and keeps component tests independent of HTTP.
+
+**No big-bang folder rewrite.** New work follows these boundaries immediately. Existing code moves only when a task changes it or when a focused extraction has a behavior-preserving test. File size may trigger a review, but mixed responsibility—not a line limit—is what requires extraction.

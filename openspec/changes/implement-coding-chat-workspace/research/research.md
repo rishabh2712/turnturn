@@ -167,3 +167,30 @@ Current turnturn evidence:
 - `apps/web/src/App.tsx` renders the catalog as a native `<select>`, while its `switchModel` path already has the correct D28 behavior. The task replaces presentation and catalog sourcing, not activation semantics.
 
 Discovery is deliberately treated as availability evidence, not a conformance test. A provider listing a model does not prove that it supports turnturn's tool schema or streaming edge cases. Ollama exposes explicit capabilities; other gateways may not. The three-state tool compatibility field (`supported`, `unsupported`, `unknown`) preserves that uncertainty instead of converting it into a false guarantee.
+
+---
+
+## Frontend responsibility amendment
+
+Date: 2026-09-21
+
+This evidence supports D33.
+
+### Vercel AI SDK UI
+
+- `useChat` is a framework adapter around a separately constructible `Chat` object and subscribes with `useSyncExternalStore`; communication is injected through a `ChatTransport`: <https://github.com/vercel/ai/blob/main/packages/react/src/use-chat.ts>.
+- The transport is a small interface with send/reconnect operations, and the docs explicitly support alternate HTTP, direct in-process, and custom transports: <https://github.com/vercel/ai/blob/main/packages/ai/src/ui/chat-transport.ts> and <https://ai-sdk.dev/docs/ai-sdk-ui/transport>.
+- `UIMessage` is intentionally distinct from provider/model messages and carries typed parts for UI rendering: <https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message>.
+
+**Borrowed:** state is independently constructible, the React hook is an adapter/controller rather than the state machine, transport is injected, and views render a UI-specific model. This matches turnturn's existing `ConversationStore`, `ChatTransport`, and `ConversationPresentation`; D33 completes the React side of that shape.
+
+**Not borrowed:** Vercel's message/part contract, request lifecycle, or tool semantics. Turnturn's durable log and projector remain authoritative.
+
+### Open WebUI
+
+- The current top-level `src/lib/components/chat/Chat.svelte` is over 4,000 lines and imports navigation, stores, sockets, API clients, conversion helpers, tool resolution, and many display concerns in one component: <https://github.com/open-webui/open-webui/blob/main/src/lib/components/chat/Chat.svelte>.
+- Open WebUI also has purpose-built message, sidebar, tool, Markdown, and artifact components, which is evidence that chat UX benefits from semantic child surfaces rather than a generic JSON renderer.
+
+**Borrowed:** purpose-built semantic surfaces and feature vocabulary.
+
+**Rejected as a boundary:** the central chat component. Its breadth is a concrete example of why turnturn's `App.tsx` must stop before it accumulates transport, resume, approval, model switching, file preview, composer, and transcript orchestration together.

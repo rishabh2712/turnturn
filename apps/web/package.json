@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && vite build && node scripts/check-bundle-budget.mjs",
     "dev": "vite --host 127.0.0.1",
     "lint": "biome check .",
     "test": "vitest run",
@@ -16,14 +16,22 @@
     "@vitejs/plugin-react": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "react-markdown": "10.1.0",
+    "rehype-sanitize": "6.0.0",
+    "remark-gfm": "4.0.1",
+    "shiki": "4.4.3",
     "typescript": "5.9.2",
+    "unist-util-visit": "^5.0.0",
     "vite": "latest"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",
+    "@types/hast": "^3.0.4",
+    "@types/mdast": "^4.0.4",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "happy-dom": "^20.14.5",
+    "unified": "^11.0.5",
     "vitest": "^5.0.0"
   }
 }

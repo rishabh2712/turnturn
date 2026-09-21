@@ -15,6 +15,8 @@ import { TurnInspector } from "./components/developer/TurnInspector";
 import { ModelPicker } from "./components/model/ModelPicker";
 import { ConversationSidebar } from "./components/shell/ConversationSidebar";
 import { TurnBlock } from "./components/turn/TurnBlock";
+import { ConversationViewport } from "./components/viewport/ConversationViewport";
+import { WorkspaceFilePeekProvider } from "./features/file-preview/WorkspaceFilePeekProvider";
 import { ConversationListProvider, useConversationList } from "./providers/ConversationListProvider";
 import { RuntimeProvider, useRuntime } from "./providers/RuntimeProvider";
 import { useChatTransport } from "./providers/TransportProvider";
@@ -111,75 +113,79 @@ function AppShell() {
   );
 
   return (
-    <div className="tt-app-shell">
-      <ConversationSidebar
-        workspaceName={runtime.status === "ready" ? runtime.runtime.workspace.name : "Workspace"}
-        conversations={list.conversations}
-        archivedConversations={list.archivedConversations}
-        selectedConversationId={list.selectedId}
-        onCreate={() => {
-          void list.create().catch((cause: unknown) => setError(messageOf(cause)));
-        }}
-        onSelect={list.select}
-        onRename={(id, title) => list.rename(id, title).catch((cause: unknown) => setError(messageOf(cause)))}
-        onArchive={(id, archived) => list.archive(id, archived).catch((cause: unknown) => setError(messageOf(cause)))}
-      />
-      <main className="tt-main">
-        {runtime.status === "error" ? <p role="alert">Could not load workspace: {runtime.message}</p> : null}
-        {list.status === "error" ? <p role="alert">Could not load conversations: {list.error}</p> : null}
-        {error !== undefined ? (
-          <p className="tt-notice" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {selected !== undefined ? (
-          <ConversationPane
-            key={selected.conversationId}
-            conversationId={selected.conversationId}
-            title={selected.title ?? "New conversation"}
-            archived={selected.archived}
-            store={storeFor(selected.conversationId)}
-            transport={transport}
-            workspaceName={runtime.status === "ready" ? runtime.runtime.workspace.name : "Workspace"}
-            models={runtime.status === "ready" ? runtime.runtime.models : []}
-            defaultModelProfileId={runtime.status === "ready" ? runtime.runtime.defaultModelProfileId : "default"}
-            catalog={providerCatalog.catalog}
-            onRefreshCatalog={providerCatalog.refresh}
-            refreshingCatalog={providerCatalog.refreshing}
-            onActivity={list.refresh}
-          />
-        ) : list.status === "loading" || runtime.status === "loading" ? (
-          <div className="tt-centered-state">Opening workspace…</div>
-        ) : (
-          <div className="tt-first-run">
-            <div className="tt-first-run-copy">
-              <span className="tt-sparkle" aria-hidden="true">
-                ✦
-              </span>
-              <h1>What would you like to work on?</h1>
-              <p>{runtime.status === "ready" ? runtime.runtime.workspace.path : "Create a conversation to begin."}</p>
-            </div>
-            <Composer
-              draft={draft}
-              setDraft={setDraft}
-              onSend={beginConversation}
-              disabled={busy || runtime.status !== "ready"}
-              busy={busy}
-              footer={runtime.status === "ready" ? `${runtime.runtime.workspace.name} · ${runtime.runtime.model}` : ""}
+    <WorkspaceFilePeekProvider workspaceKey={runtime.status === "ready" ? runtime.runtime.workspace.key : undefined}>
+      <div className="tt-app-shell">
+        <ConversationSidebar
+          workspaceName={runtime.status === "ready" ? runtime.runtime.workspace.name : "Workspace"}
+          conversations={list.conversations}
+          archivedConversations={list.archivedConversations}
+          selectedConversationId={list.selectedId}
+          onCreate={() => {
+            void list.create().catch((cause: unknown) => setError(messageOf(cause)));
+          }}
+          onSelect={list.select}
+          onRename={(id, title) => list.rename(id, title).catch((cause: unknown) => setError(messageOf(cause)))}
+          onArchive={(id, archived) => list.archive(id, archived).catch((cause: unknown) => setError(messageOf(cause)))}
+        />
+        <main className="tt-main">
+          {runtime.status === "error" ? <p role="alert">Could not load workspace: {runtime.message}</p> : null}
+          {list.status === "error" ? <p role="alert">Could not load conversations: {list.error}</p> : null}
+          {error !== undefined ? (
+            <p className="tt-notice" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {selected !== undefined ? (
+            <ConversationPane
+              key={selected.conversationId}
+              conversationId={selected.conversationId}
+              title={selected.title ?? "New conversation"}
+              archived={selected.archived}
+              store={storeFor(selected.conversationId)}
+              transport={transport}
+              workspaceName={runtime.status === "ready" ? runtime.runtime.workspace.name : "Workspace"}
+              models={runtime.status === "ready" ? runtime.runtime.models : []}
+              defaultModelProfileId={runtime.status === "ready" ? runtime.runtime.defaultModelProfileId : "default"}
+              catalog={providerCatalog.catalog}
+              onRefreshCatalog={providerCatalog.refresh}
+              refreshingCatalog={providerCatalog.refreshing}
+              onActivity={list.refresh}
             />
-            {runtime.status === "ready" ? (
-              <ModelPicker
-                catalog={providerCatalog.catalog}
-                value={newConversationModelId ?? runtime.runtime.defaultModelProfileId}
-                onChange={setNewConversationModelId}
-                onRefresh={() => void providerCatalog.refresh()}
-                refreshing={providerCatalog.refreshing}
+          ) : list.status === "loading" || runtime.status === "loading" ? (
+            <div className="tt-centered-state">Opening workspace…</div>
+          ) : (
+            <div className="tt-first-run">
+              <div className="tt-first-run-copy">
+                <span className="tt-sparkle" aria-hidden="true">
+                  ✦
+                </span>
+                <h1>What would you like to work on?</h1>
+                <p>{runtime.status === "ready" ? runtime.runtime.workspace.path : "Create a conversation to begin."}</p>
+              </div>
+              <Composer
+                draft={draft}
+                setDraft={setDraft}
+                onSend={beginConversation}
+                disabled={busy || runtime.status !== "ready"}
+                busy={busy}
+                footer={
+                  runtime.status === "ready" ? `${runtime.runtime.workspace.name} · ${runtime.runtime.model}` : ""
+                }
               />
-            ) : null}
-          </div>
-        )}
-      </main>
-    </div>
+              {runtime.status === "ready" ? (
+                <ModelPicker
+                  catalog={providerCatalog.catalog}
+                  value={newConversationModelId ?? runtime.runtime.defaultModelProfileId}
+                  onChange={setNewConversationModelId}
+                  onRefresh={() => void providerCatalog.refresh()}
+                  refreshing={providerCatalog.refreshing}
+                />
+              ) : null}
+            </div>
+          )}
+        </main>
+      </div>
+    </WorkspaceFilePeekProvider>
   );
 }
 
@@ -332,7 +338,7 @@ function ConversationPane(props: ConversationPaneProps) {
           {error}
         </p>
       ) : null}
-      <div aria-live="polite" className="tt-transcript">
+      <ConversationViewport contentRevision={snapshot.view} itemCount={presentation.timeline.length}>
         {loading ? <p className="tt-muted">Loading conversation…</p> : null}
         {!loading && snapshot.view.items.length === 0 ? (
           <div className="tt-empty-conversation">
@@ -364,7 +370,7 @@ function ConversationPane(props: ConversationPaneProps) {
             {phaseLabel(snapshot.view.activeTurn?.phase ?? "waiting-for-model")}
           </output>
         ) : null}
-      </div>
+      </ConversationViewport>
       <Composer
         draft={draft}
         setDraft={setDraft}

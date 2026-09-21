@@ -3,6 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      T6 6.7 — strict CSP. `script-src 'self'` with no `unsafe-inline`/`unsafe-eval`
+      means no injected `<script>` (D17's containment story: a `<script>` in
+      assistant text can't be interpreted as HTML *or* executed as script even
+      if that boundary were ever breached). `connect-src 'self'` covers every
+      transport call this app makes — `/api`, `/commands`, `/records`, `/debug`,
+      and the `EventSource` at `/events` (CSP's `'self'` matches a same-origin
+      `ws:`/`wss:` upgrade too, so the Vite dev server's HMR socket needs no
+      separate allowance). `style-src` keeps `'unsafe-inline'` for one narrow,
+      deliberate reason: Shiki (6.3) emits per-token `style="color:#…"` on the
+      highlighted spans — it is not attacker-controlled markup (we sanitize the
+      *text* Shiki tokenizes, and inline `style` cannot execute script), but an
+      inline-styled span still needs it. `img-src 'self'` is unused today (6.1
+      turns `![]()` into a link, never an `<img>`) and kept only as a safe
+      default rather than widened for a feature that does not exist.
+      `frame-ancestors` is deliberately omitted here: browsers ignore that
+      directive entirely when delivered via `<meta>` (Chrome logs it as an
+      error) — it only takes effect from an HTTP response header, so it
+      belongs on the server that serves this file, not in this document.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>Turnturn</title>
   </head>
   <body>

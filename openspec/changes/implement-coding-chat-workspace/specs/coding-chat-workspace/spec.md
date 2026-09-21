@@ -155,6 +155,29 @@ The client SHALL render assistant message content as Markdown with syntax-highli
 - **THEN** it SHALL render without error
 - **AND** the text already received SHALL remain visible
 
+### Requirement: Streaming assistant text arrives with a subtle transition
+
+The client SHALL give newly appended streaming text a brief, non-disruptive visual transition rather than appearing instantly, and SHALL NOT apply that transition to durable content or to any non-text item.
+
+#### Scenario: Text streams in softly
+
+- **GIVEN** an assistant message currently streaming
+- **WHEN** a new chunk of text is appended
+- **THEN** it SHALL transition in rather than appear at full opacity instantly
+- **AND** the transition SHALL apply only to the newly appended chunk
+
+#### Scenario: The durable message never replays the transition
+
+- **GIVEN** a streaming assistant message that reaches its durable, completed form
+- **WHEN** the durable content supersedes the live text
+- **THEN** the full message SHALL render at full opacity with no transition
+
+#### Scenario: Reduced motion is honored
+
+- **GIVEN** the reader has requested reduced motion
+- **WHEN** assistant text streams in
+- **THEN** no transition SHALL be applied
+
 ### Requirement: Workspace file references are actionable
 
 The client SHALL present workspace file paths in assistant messages and tool activity as file references that resolve through the host application rather than through the browser's filesystem access.
@@ -179,7 +202,7 @@ The client SHALL present workspace file paths in assistant messages and tool act
 
 ### Requirement: Approvals are resolved in place without losing context
 
-The client SHALL present a pending approval inline at the point in the transcript where it was requested, SHALL show what is being approved verbatim, and SHALL resolve it by submitting a command.
+The client SHALL present a pending approval inline at the point in the transcript where it was requested, SHALL also present it in a pinned indication visible regardless of scroll position, SHALL show what is being approved verbatim, and SHALL resolve it by submitting a command.
 
 #### Scenario: A shell command awaits approval
 
@@ -189,12 +212,27 @@ The client SHALL present a pending approval inline at the point in the transcrip
 - **AND** the working directory SHALL be shown
 - **AND** allow and deny SHALL both be offered
 
-#### Scenario: Approval is off screen
+#### Scenario: A pending approval is always visible regardless of scroll position
 
-- **GIVEN** a pending approval scrolled out of view
-- **WHEN** the conversation is displayed
-- **THEN** a persistent indication SHALL be shown
-- **AND** it SHALL offer to move the viewport to the approval
+- **GIVEN** a pending approval, inline at its transcript position
+- **WHEN** the conversation is displayed, whether or not the inline card is currently in view
+- **THEN** a pinned indication SHALL be shown at a fixed position above the transcript
+- **AND** it SHALL offer allow and deny directly
+- **AND** it SHALL offer to move the viewport to the inline card
+
+#### Scenario: Resolving from the pinned indication or the inline card is the same action
+
+- **GIVEN** a pending approval
+- **WHEN** the user chooses allow or deny from the pinned indication
+- **THEN** the outcome SHALL be identical to choosing the same action from the inline card
+- **AND** both SHALL become unavailable together once resolved
+
+#### Scenario: The pinned indication never moves the viewport by itself
+
+- **GIVEN** a reader who has scrolled away from the end of the transcript
+- **WHEN** a pending approval appears or clears
+- **THEN** the viewport SHALL NOT move
+- **AND** the pinned indication and the "return to newest content" action SHALL both remain available
 
 #### Scenario: Approval resolution is in flight
 

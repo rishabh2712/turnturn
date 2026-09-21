@@ -6,6 +6,7 @@ import type {
 } from "@turnturn/chat-client";
 import type { ApprovalDecisions, ConversationId } from "@turnturn/protocol";
 import { ApprovalCard } from "../approval/ApprovalCard";
+import { MarkdownMessage } from "../markdown/MarkdownMessage";
 import { ToolActionCard } from "../tool/ToolActionCard";
 
 export function TurnBlock({
@@ -69,7 +70,7 @@ export function TurnBlock({
             ) : null}
           </span>
           <div>
-            {turn.finalResponse.text}
+            <MarkdownMessage content={turn.finalResponse.text} streaming={turn.finalResponse.streaming} />
             {turn.finalResponse.streaming ? <span className="tt-cursor">▋</span> : null}
           </div>
         </div>
