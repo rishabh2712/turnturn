@@ -135,6 +135,7 @@ function publicConfig(config: AssistantServerConfig) {
 function profileFromLegacyConfig(config: AssistantServerConfig, id: string): ModelProfileConfig {
   return {
     id,
+    connectionId: config.provider,
     label: config.model,
     provider: config.provider,
     model: config.model,

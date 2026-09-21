@@ -153,3 +153,77 @@ test("require throws for an id whose connection was never configured", () => {
   assert.throws(() => catalog.require("nonexistent"), /MODEL_PROFILE_NOT_FOUND/);
   assert.throws(() => catalog.require("openai-chat-completions__bm9wZQ"), /MODEL_PROFILE_NOT_FOUND/);
 });
+
+test("two provider connections may share one wire without losing identity or adapter ownership", async () => {
+  const catalog = new ModelCatalog(
+    [
+      {
+        id: "default",
+        connectionId: "litellm",
+        label: "LiteLLM default",
+        provider: "openai-chat-completions",
+        model: "shared-model",
+      },
+      {
+        id: "openai-manual",
+        connectionId: "openai",
+        label: "OpenAI manual",
+        provider: "openai-chat-completions",
+        model: "shared-model",
+      },
+    ],
+    "default",
+    [
+      {
+        id: "litellm",
+        wire: "openai-chat-completions",
+        label: "LiteLLM",
+        locality: "remote",
+        baseUrl: "https://litellm.example.test",
+        apiKey: "litellm-key",
+        discover: async () => ({
+          status: "ok",
+          models: [{ modelId: "gateway-only", label: "Gateway only", toolCompatibility: "unknown" }],
+        }),
+      },
+      {
+        id: "openai",
+        wire: "openai-chat-completions",
+        label: "OpenAI",
+        locality: "remote",
+        baseUrl: "https://api.openai.example.test",
+        apiKey: "openai-key",
+        discover: async () => ({
+          status: "ok",
+          models: [{ modelId: "openai-only", label: "OpenAI only", toolCompatibility: "supported" }],
+        }),
+      },
+    ],
+  );
+
+  await catalog.refreshAll();
+  const snapshot = catalog.providerSnapshot();
+  assert.deepEqual(snapshot.connections.map((connection) => connection.id).sort(), ["litellm", "openai"]);
+  assert.ok(
+    snapshot.connections
+      .find((connection) => connection.id === "litellm")
+      .models.some((m) => m.model === "gateway-only"),
+  );
+  assert.ok(
+    snapshot.connections.find((connection) => connection.id === "openai").models.some((m) => m.model === "openai-only"),
+  );
+
+  const litellmDiscovered = snapshot.connections
+    .find((connection) => connection.id === "litellm")
+    .models.find((model) => model.model === "gateway-only");
+  const openaiDiscovered = snapshot.connections
+    .find((connection) => connection.id === "openai")
+    .models.find((model) => model.model === "openai-only");
+  assert.match(litellmDiscovered.id, /^litellm__/);
+  assert.match(openaiDiscovered.id, /^openai__/);
+
+  const litellmAdapter = catalog.createProvider(catalog.require(litellmDiscovered.id));
+  const openaiAdapter = catalog.createProvider(catalog.require(openaiDiscovered.id));
+  assert.equal(litellmAdapter.options.baseUrl, "https://litellm.example.test");
+  assert.equal(openaiAdapter.options.baseUrl, "https://api.openai.example.test");
+});

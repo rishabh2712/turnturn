@@ -1,6 +1,6 @@
 import type { ProviderPort } from "@turnturn/assistant-core/ports";
 import type { DiscoveredModelOption, DiscoveryOutcome, ToolCompatibility } from "./model-discovery/types.js";
-import { createProviderConnection, type WireKind } from "./provider-registry.js";
+import { createProviderConnection, ProviderRegistry, type WireKind } from "./provider-registry.js";
 
 export type { ToolCompatibility } from "./model-discovery/types.js";
 export type { WireKind as ProviderKind } from "./provider-registry.js";
@@ -8,6 +8,8 @@ export type { WireKind as ProviderKind } from "./provider-registry.js";
 /** A manually configured profile. Always available, always takes priority over a discovered entry. */
 export interface ModelProfileConfig {
   readonly id: string;
+  /** Stable owner identity. Profiles on different connections may use the same wire and model id. */
+  readonly connectionId: string;
   readonly label: string;
   readonly provider: WireKind;
   readonly model: string;
@@ -30,13 +32,13 @@ export interface StoredModelIdentity {
 }
 
 /**
- * A connection the server discovers models from. In this deployment there is at most
- * one connection per wire kind (the env surface exposes one base URL/credential per
- * wire), so the wire kind doubles as the connection id. `label`/`locality` are display
- * facts only; `discover` is never invoked from the browser (D29) — it always runs
- * server-side against credentials resolved at startup.
+ * A connection the server discovers models from. Its stable id is deliberately
+ * independent of its wire: LiteLLM and direct OpenAI can both speak the same wire.
+ * `discover` is never invoked from the browser (D29) — it always runs server-side
+ * against credentials resolved at startup.
  */
 export interface DiscoveryConnectionConfig {
+  readonly id: string;
   readonly wire: WireKind;
   readonly label: string;
   readonly locality: "local" | "remote";
@@ -85,9 +87,10 @@ const SEPARATOR = "__";
 
 export class ModelCatalog {
   private readonly profiles: ReadonlyMap<string, ModelProfileConfig>;
-  private readonly discoveryConnections: ReadonlyMap<WireKind, DiscoveryConnectionConfig>;
-  private readonly connectionState = new Map<WireKind, ConnectionState>();
-  private readonly generation = new Map<WireKind, number>();
+  private readonly providers: ProviderRegistry;
+  private readonly discoveryConnections: ReadonlyMap<string, DiscoveryConnectionConfig>;
+  private readonly connectionState = new Map<string, ConnectionState>();
+  private readonly generation = new Map<string, number>();
 
   constructor(
     profiles: readonly ModelProfileConfig[],
@@ -99,17 +102,21 @@ export class ModelCatalog {
       if (!/^[a-z0-9][a-z0-9._-]*$/i.test(profile.id)) throw new Error(`Invalid model profile id: ${profile.id}`);
       if (entries.has(profile.id)) throw new Error(`Duplicate model profile id: ${profile.id}`);
       if (profile.label.trim().length === 0) throw new Error(`Model profile ${profile.id} needs a label`);
-      entries.set(profile.id, profile);
+      // Runtime callers compiled before D30 may omit connectionId. Falling back to
+      // the wire preserves those saved/startup configurations without conflating new
+      // explicitly named connections.
+      const normalized = { ...profile, connectionId: profile.connectionId ?? profile.provider };
+      entries.set(profile.id, normalized);
     }
     if (!entries.has(defaultProfileId)) throw new Error(`Default model profile does not exist: ${defaultProfileId}`);
     this.profiles = entries;
 
-    const connections = new Map<WireKind, DiscoveryConnectionConfig>();
+    const connections = new Map<string, DiscoveryConnectionConfig>();
     for (const connection of discoveryConnections) {
-      if (connections.has(connection.wire))
-        throw new Error(`Duplicate discovery connection for wire: ${connection.wire}`);
-      connections.set(connection.wire, connection);
-      this.connectionState.set(connection.wire, {
+      const normalized = { ...connection, id: connection.id ?? connection.wire };
+      if (connections.has(normalized.id)) throw new Error(`Duplicate discovery connection id: ${normalized.id}`);
+      connections.set(normalized.id, normalized);
+      this.connectionState.set(normalized.id, {
         status: "idle",
         stale: false,
         lastSuccessAt: null,
@@ -118,6 +125,29 @@ export class ModelCatalog {
       });
     }
     this.discoveryConnections = connections;
+
+    const providerConnections = [...connections.values()].map((connection) => createProviderConnection(connection));
+    const connectionIds = new Set(providerConnections.map((connection) => connection.id));
+    for (const profile of entries.values()) {
+      const configured = providerConnections.find((connection) => connection.id === profile.connectionId);
+      if (configured !== undefined && configured.wire !== profile.provider) {
+        throw new Error(`Model profile ${profile.id} wire does not match connection ${profile.connectionId}`);
+      }
+      if (connectionIds.has(profile.connectionId)) continue;
+      providerConnections.push(
+        createProviderConnection({
+          id: profile.connectionId,
+          label: profile.label,
+          locality: profile.provider === "ollama" ? "local" : "remote",
+          wire: profile.provider,
+          ...(profile.baseUrl === undefined ? {} : { baseUrl: profile.baseUrl }),
+          ...(profile.apiKey === undefined ? {} : { apiKey: profile.apiKey }),
+          ...(profile.maxTokens === undefined ? {} : { maxTokens: profile.maxTokens }),
+        }),
+      );
+      connectionIds.add(profile.connectionId);
+    }
+    this.providers = new ProviderRegistry(providerConnections);
   }
 
   get defaultProfile(): ModelProfileConfig {
@@ -132,13 +162,14 @@ export class ModelCatalog {
       provider,
       model,
     }));
-    for (const [wire, state] of this.connectionState) {
+    for (const [connectionId, state] of this.connectionState) {
       for (const option of state.discovered) {
-        if (this.shadowedByConfigured(wire, option.modelId)) continue;
+        const connection = this.providers.require(connectionId);
+        if (this.shadowedByConfigured(connectionId, option.modelId)) continue;
         result.push({
-          id: this.discoveredId(wire, option.modelId),
+          id: this.discoveredId(connectionId, option.modelId),
           label: option.label,
-          provider: wire,
+          provider: connection.wire,
           model: option.modelId,
         });
       }
@@ -148,16 +179,14 @@ export class ModelCatalog {
 
   /** The grouped, safe DTO behind `GET /api/providers`. Never includes a credential, header, or endpoint URL. */
   providerSnapshot(): ProviderCatalogSnapshot {
-    const wires = new Set<WireKind>([
-      ...this.discoveryConnections.keys(),
-      ...[...this.profiles.values()].map((profile) => profile.provider),
-    ]);
     const connections: PublicProviderConnection[] = [];
-    for (const wire of wires) {
-      const discoveryConfig = this.discoveryConnections.get(wire);
-      const state = this.connectionState.get(wire);
-      const configuredForWire = [...this.profiles.values()].filter((profile) => profile.provider === wire);
-      const configuredModels: PublicModelOption[] = configuredForWire.map((profile) => ({
+    for (const connection of this.providers.list()) {
+      const discoveryConfig = this.discoveryConnections.get(connection.id);
+      const state = this.connectionState.get(connection.id);
+      const configuredForConnection = [...this.profiles.values()].filter(
+        (profile) => profile.connectionId === connection.id,
+      );
+      const configuredModels: PublicModelOption[] = configuredForConnection.map((profile) => ({
         id: profile.id,
         label: profile.label,
         model: profile.model,
@@ -166,9 +195,9 @@ export class ModelCatalog {
         available: true,
       }));
       const discoveredModels: PublicModelOption[] = (state?.discovered ?? [])
-        .filter((option) => !configuredForWire.some((profile) => profile.model === option.modelId))
+        .filter((option) => !configuredForConnection.some((profile) => profile.model === option.modelId))
         .map((option) => ({
-          id: this.discoveredId(wire, option.modelId),
+          id: this.discoveredId(connection.id, option.modelId),
           label: option.label,
           model: option.modelId,
           source: "discovered",
@@ -176,10 +205,10 @@ export class ModelCatalog {
           available: true,
         }));
       connections.push({
-        id: wire,
-        label: discoveryConfig?.label ?? wire,
-        locality: discoveryConfig?.locality ?? (wire === "ollama" ? "local" : "remote"),
-        wire,
+        id: connection.id,
+        label: discoveryConfig?.label ?? connection.label,
+        locality: discoveryConfig?.locality ?? connection.locality,
+        wire: connection.wire,
         status: state?.status ?? "idle",
         stale: state?.stale ?? false,
         lastSuccessAt: state?.lastSuccessAt ?? null,
@@ -201,9 +230,9 @@ export class ModelCatalog {
   }
 
   private async refreshOne(connection: DiscoveryConnectionConfig): Promise<void> {
-    const myGeneration = (this.generation.get(connection.wire) ?? 0) + 1;
-    this.generation.set(connection.wire, myGeneration);
-    this.updateState(connection.wire, (state) => ({ ...state, status: "refreshing" }));
+    const myGeneration = (this.generation.get(connection.id) ?? 0) + 1;
+    this.generation.set(connection.id, myGeneration);
+    this.updateState(connection.id, (state) => ({ ...state, status: "refreshing" }));
 
     const controller = new AbortController();
     let outcome: DiscoveryOutcome;
@@ -214,10 +243,10 @@ export class ModelCatalog {
     }
 
     // Last-started-wins: a completion from a superseded refresh is discarded outright.
-    if (this.generation.get(connection.wire) !== myGeneration) return;
+    if (this.generation.get(connection.id) !== myGeneration) return;
 
     if (outcome.status === "ok") {
-      this.updateState(connection.wire, () => ({
+      this.updateState(connection.id, () => ({
         status: "ok",
         stale: false,
         lastSuccessAt: new Date().toISOString(),
@@ -225,7 +254,7 @@ export class ModelCatalog {
         discovered: outcome.models,
       }));
     } else {
-      this.updateState(connection.wire, (state) => ({
+      this.updateState(connection.id, (state) => ({
         status: "error",
         stale: state.discovered.length > 0,
         lastSuccessAt: state.lastSuccessAt,
@@ -235,22 +264,22 @@ export class ModelCatalog {
     }
   }
 
-  private updateState(wire: WireKind, update: (state: ConnectionState) => ConnectionState): void {
-    const current = this.connectionState.get(wire) ?? {
+  private updateState(connectionId: string, update: (state: ConnectionState) => ConnectionState): void {
+    const current = this.connectionState.get(connectionId) ?? {
       status: "idle",
       stale: false,
       lastSuccessAt: null,
       error: null,
       discovered: [],
     };
-    this.connectionState.set(wire, update(current));
+    this.connectionState.set(connectionId, update(current));
   }
 
   /** True for a configured profile, or a profile currently visible in the live discovery snapshot. */
   isAvailable(id: string): boolean {
     if (this.profiles.has(id)) return true;
-    for (const [wire, state] of this.connectionState) {
-      if (state.discovered.some((option) => this.discoveredId(wire, option.modelId) === id)) return true;
+    for (const [connectionId, state] of this.connectionState) {
+      if (state.discovered.some((option) => this.discoveredId(connectionId, option.modelId) === id)) return true;
     }
     return false;
   }
@@ -285,29 +314,20 @@ export class ModelCatalog {
   }
 
   createProvider(profile: ModelProfileConfig): ProviderPort {
-    // The on-the-fly connection id here is only a construction detail of
-    // `createProviderConnection` (it must avoid the "__" profile-id separator); it is
-    // not the profile id and is never observed outside this call.
-    const connection = createProviderConnection({
-      id: profile.provider,
-      label: profile.label,
-      locality: profile.provider === "ollama" ? "local" : "remote",
-      wire: profile.provider,
-      ...(profile.baseUrl === undefined ? {} : { baseUrl: profile.baseUrl }),
-      ...(profile.apiKey === undefined ? {} : { apiKey: profile.apiKey }),
-      ...(profile.maxTokens === undefined ? {} : { maxTokens: profile.maxTokens }),
-    });
+    const connection = this.providers.require(profile.connectionId ?? profile.provider);
     return connection.createAdapter(profile.model, profile.maxTokens);
   }
 
-  private shadowedByConfigured(wire: WireKind, modelId: string): boolean {
-    return [...this.profiles.values()].some((profile) => profile.provider === wire && profile.model === modelId);
+  private shadowedByConfigured(connectionId: string, modelId: string): boolean {
+    return [...this.profiles.values()].some(
+      (profile) => profile.connectionId === connectionId && profile.model === modelId,
+    );
   }
 
   private findDiscoveredProfile(id: string): ModelProfileConfig | undefined {
-    for (const [wire, state] of this.connectionState) {
-      const found = state.discovered.find((option) => this.discoveredId(wire, option.modelId) === id);
-      if (found !== undefined) return this.profileForDiscovered(wire, found.modelId, found.label);
+    for (const [connectionId, state] of this.connectionState) {
+      const found = state.discovered.find((option) => this.discoveredId(connectionId, option.modelId) === id);
+      if (found !== undefined) return this.profileForDiscovered(connectionId, found.modelId, found.label);
     }
     return undefined;
   }
@@ -315,8 +335,8 @@ export class ModelCatalog {
   private reconstructPhantomProfile(id: string): ModelProfileConfig | undefined {
     const separatorIndex = id.indexOf(SEPARATOR);
     if (separatorIndex <= 0) return undefined;
-    const wire = id.slice(0, separatorIndex) as WireKind;
-    if (!this.discoveryConnections.has(wire)) return undefined;
+    const connectionId = id.slice(0, separatorIndex);
+    if (!this.discoveryConnections.has(connectionId)) return undefined;
     let model: string;
     try {
       model = Buffer.from(id.slice(separatorIndex + SEPARATOR.length), "base64url").toString("utf8");
@@ -324,23 +344,22 @@ export class ModelCatalog {
       return undefined;
     }
     if (model.length === 0) return undefined;
-    return this.profileForDiscovered(wire, model, model);
+    return this.profileForDiscovered(connectionId, model, model);
   }
 
-  private profileForDiscovered(wire: WireKind, model: string, label: string): ModelProfileConfig {
-    const connection = this.discoveryConnections.get(wire);
+  private profileForDiscovered(connectionId: string, model: string, label: string): ModelProfileConfig {
+    const connection = this.providers.require(connectionId);
     return {
-      id: this.discoveredId(wire, model),
+      id: this.discoveredId(connectionId, model),
+      connectionId,
       label,
-      provider: wire,
+      provider: connection.wire,
       model,
-      ...(connection?.baseUrl === undefined ? {} : { baseUrl: connection.baseUrl }),
-      ...(connection?.apiKey === undefined ? {} : { apiKey: connection.apiKey }),
-      ...(connection?.maxTokens === undefined ? {} : { maxTokens: connection.maxTokens }),
+      ...(connection.maxTokens === undefined ? {} : { maxTokens: connection.maxTokens }),
     };
   }
 
-  private discoveredId(wire: WireKind, modelId: string): string {
-    return `${wire}${SEPARATOR}${Buffer.from(modelId, "utf8").toString("base64url")}`;
+  private discoveredId(connectionId: string, modelId: string): string {
+    return `${connectionId}${SEPARATOR}${Buffer.from(modelId, "utf8").toString("base64url")}`;
   }
 }

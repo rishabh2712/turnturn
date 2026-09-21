@@ -103,6 +103,7 @@ function configuredModelProfiles(options: {
   const profiles: ModelProfileConfig[] = [
     {
       id: "default",
+      connectionId: options.provider,
       label: options.model,
       provider: options.provider,
       model: options.model,
@@ -118,6 +119,7 @@ function configuredModelProfiles(options: {
     if (options.provider === "anthropic-messages" && anthropicModel === options.model) continue;
     profiles.push({
       id: `anthropic-${index + 1}`,
+      connectionId: "anthropic-messages",
       label: anthropicModel,
       provider: "anthropic-messages",
       model: anthropicModel,
@@ -139,6 +141,7 @@ function configuredDiscoveryConnections(options: {
   const anthropicKey = options.provider === "anthropic-messages" ? options.apiKey : options.anthropicApiKey;
   if (anthropicKey !== undefined) {
     connections.push({
+      id: "anthropic-messages",
       wire: "anthropic-messages",
       label: "Anthropic",
       locality: "remote",
@@ -159,6 +162,7 @@ function configuredDiscoveryConnections(options: {
   }
   if (options.provider === "ollama") {
     connections.push({
+      id: "ollama",
       wire: "ollama",
       label: "Ollama (local)",
       locality: "local",
@@ -171,6 +175,7 @@ function configuredDiscoveryConnections(options: {
   if (options.provider === "openai-chat-completions") {
     const baseUrl = options.baseUrl ?? "https://api.openai.com";
     connections.push({
+      id: "openai-chat-completions",
       wire: "openai-chat-completions",
       label: "OpenAI-compatible",
       locality: "remote",
