@@ -184,6 +184,25 @@ The first message in a brand-new conversation is a special boundary: the shell m
 
 The first tests should verify the current reload behavior still works, then target what is missing: a visible decision while scrolled away, one shared resolving state across two approval surfaces, a working Stop command, and isolation when rapidly switching conversations. They should not be described as tests that currently fail merely because the present architecture is dense.
 
+## Interaction grammar for one coding turn
+
+Before adding another approval surface, give each element one job. This applies the reference lessons to turnturn's existing `ConversationStore` and presentation model; it is not a new component library or a second runtime. One turn reads as **request → model activity → tool action/result → decision when blocked → answer/outcome**. Render steps in that order, but do not make every provider or durable event a separate visible message.
+
+| Role | What the user needs first | Default surface | Expand or inspect | Source of truth |
+| --- | --- | --- | --- | --- |
+| Request | Their submitted words | User message, once per turn | None required | Durable accepted input; optimistic text only before catch-up |
+| Activity | What is happening *now* | Quiet, concise running status | Tool group/progress when useful | Live state is provisional; durable projection supersedes it |
+| Action/result | What the agent did and whether it worked | Known-tool verb, target, and outcome in a grouped card | Exact arguments, output, paths, and errors; neutral raw fallback for unknown tools | Projected tool request/result |
+| Decision | What will happen if they Allow or Deny | Full inline approval at its tool; compact persistent reminder near the composer while it blocks progress | Exact command/input, working directory, and available scope **before** either choice | Projected pending approval and its stable `approvalId` |
+| Receipt | What choice was recorded | Read-only decision label at the original action | Preserve the inspected action context | Durable `approval.resolved` or terminal cancellation, never a click alone |
+| Answer/outcome | What the assistant concluded; whether the turn ended | Final answer and unobtrusive terminal state | Opt-in trace inspector | Durable assistant message and terminal turn record |
+
+The reference roles are **information** (read/search/edit result), **state** (generating/running/reconnecting), and **decision** (approval). A card may contain more than one, but its primary role should be obvious. Routine actions start collapsed with a useful headline; a blocking decision stays visible and inspectable. Avoid repeating the same full approval card above the composer: the persistent surface identifies the pending action and offers a route to its exact details. If it also exposes Allow/Deny, those controls use the same controller operation and command status as the inline card.
+
+Decision labels describe the *decision*, not the tool result: “Allowed” means the approval was durably recorded, not that a write or command succeeded. “Denied” and “No longer pending” likewise come from the projection. While a command is in flight, both surfaces say “Resolving…” and disable duplicate choices; after a stale rejection, refresh records before showing the outcome. The existing `ToolCallView.approval` supplies a receipt after the pending-only `ApprovalRequestItem` disappears. `ToolActionPresentation` currently carries only pending approval, so the web controller passes a read-only receipt lookup from the projected tool activity to the turn view; it does not invent another lifecycle or change the public package API. A completed edit must still be labelled **applied**, never a preview.
+
+For every surface, use the engine's stable turn/tool/approval IDs, never list indexes or render-time IDs. Use known schema fields for summaries; if the command purpose or consequence is uncertain, say what is known literally and expose the exact input. The chat surface must remain usable at narrow width, with keyboard-accessible decisions, visible focus, and no forced scroll jump when new content arrives. These are implementation constraints to verify in component and browser tests, not a reason to import the reference components wholesale.
+
 The decisions below define the limits of this design. The [research](research/research.md) records the local reference evidence.
 
 ## D1 — One controller owns one selected conversation

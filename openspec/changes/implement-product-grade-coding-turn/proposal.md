@@ -1,6 +1,6 @@
 # Proposal: Product-Grade Coding Turn
 
-Companion to the M3.6 priority in `ROADMAP.md`. The roadmap owns ordering; this change owns the reason for the next slice. Design is draft and implementation must wait for review.
+Companion to the M3.6 priority in `ROADMAP.md`. The roadmap owns ordering; this change owns the reason for the next slice. Design approved 2026-09-22; implementation is underway in reviewable slices.
 
 ## Why
 

@@ -1,12 +1,13 @@
 import {
   type ApprovalRequestItem,
+  type ApprovalView,
   type ChatTransport,
   type ConversationStore,
   composeConversationPresentation,
   type ResumeController,
   resumeConversation,
 } from "@turnturn/chat-client";
-import type { ApprovalDecisions, ConversationId, TurnId } from "@turnturn/protocol";
+import type { ApprovalDecisions, ApprovalId, ConversationId, ToolCallId, TurnId } from "@turnturn/protocol";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { requestTurnCancel, resolveApproval, sendTurn } from "../../client-actions";
 
@@ -35,9 +36,15 @@ export function useConversationController(options: ConversationControllerOptions
   const [busy, setBusy] = useState(false);
   const [submittedTurnId, setSubmittedTurnId] = useState<TurnId | undefined>();
   const [cancelPendingTurnId, setCancelPendingTurnId] = useState<TurnId | undefined>();
+  const [approvalCommand, setApprovalCommand] = useState<{
+    readonly approvalId: ApprovalId;
+    readonly status: "resolving" | "stale" | "error";
+    readonly message?: string;
+  }>();
   const [modelProfileId, setModelProfileId] = useState(options.defaultModelProfileId);
   const resume = useRef<ResumeController | undefined>(undefined);
   const cancelRequested = useRef<TurnId | undefined>(undefined);
+  const approvalRequested = useRef<ApprovalId | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -86,6 +93,13 @@ export function useConversationController(options: ConversationControllerOptions
       setCancelPendingTurnId(undefined);
     }
   }, [snapshot.view.items, cancelPendingTurnId]);
+
+  useEffect(() => {
+    if (approvalCommand === undefined || snapshot.view.pendingApproval?.approvalId === approvalCommand.approvalId)
+      return;
+    approvalRequested.current = undefined;
+    setApprovalCommand(undefined);
+  }, [snapshot.view.pendingApproval?.approvalId, approvalCommand]);
 
   const presentation = composeConversationPresentation(snapshot.view);
   const connected = snapshot.connection.status === "connected";
@@ -144,13 +158,35 @@ export function useConversationController(options: ConversationControllerOptions
     }
   }
 
-  async function answerApproval(
-    item: ApprovalRequestItem,
-    decision: ApprovalDecisions,
-  ): Promise<"accepted" | "cancelled"> {
-    const outcome = await resolveApproval(transport, conversationId, item, decision);
-    await resume.current?.refresh(item.sessionId);
-    return outcome;
+  async function answerApproval(item: ApprovalRequestItem, decision: ApprovalDecisions): Promise<void> {
+    if (
+      store.getSnapshot().view.pendingApproval?.approvalId !== item.approvalId ||
+      approvalRequested.current !== undefined
+    )
+      return;
+    approvalRequested.current = item.approvalId;
+    setApprovalCommand({ approvalId: item.approvalId, status: "resolving" });
+    let outcome: "accepted" | "cancelled" | undefined;
+    try {
+      outcome = await resolveApproval(transport, conversationId, item, decision);
+      await resume.current?.refresh(item.sessionId);
+      if (outcome === "cancelled" && store.getSnapshot().view.pendingApproval?.approvalId === item.approvalId) {
+        setApprovalCommand({ approvalId: item.approvalId, status: "stale" });
+        approvalRequested.current = undefined;
+      }
+    } catch (cause) {
+      if (store.getSnapshot().view.pendingApproval?.approvalId === item.approvalId) {
+        setApprovalCommand({
+          approvalId: item.approvalId,
+          status: outcome === "accepted" ? "resolving" : outcome === "cancelled" ? "stale" : "error",
+          message:
+            outcome === "accepted"
+              ? `Decision sent; waiting for saved confirmation. ${messageOf(cause)}`
+              : messageOf(cause),
+        });
+      }
+      if (outcome !== "accepted") approvalRequested.current = undefined;
+    }
   }
 
   async function switchModel(nextProfileId: string): Promise<void> {
@@ -179,6 +215,16 @@ export function useConversationController(options: ConversationControllerOptions
     submittedTurnId,
     cancelPendingTurnId,
     canStop: cancellableTurn !== undefined,
+    pendingApproval: snapshot.view.pendingApproval,
+    approvalCommand:
+      approvalCommand?.approvalId === snapshot.view.pendingApproval?.approvalId ? approvalCommand : undefined,
+    approvalReceipts: new Map<ToolCallId, ApprovalView>(
+      snapshot.view.items
+        .filter((item) => item.kind === "tool-activity")
+        .flatMap((item) => item.calls)
+        .filter((call) => call.approval !== undefined && call.approval.status !== "pending")
+        .map((call) => [call.toolCallId, call.approval as ApprovalView]),
+    ),
     modelProfileId,
     connected,
     blocked,

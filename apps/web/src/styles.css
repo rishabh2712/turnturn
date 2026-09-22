@@ -572,6 +572,36 @@ summary:focus-visible {
   color: #3c3427;
   font-size: 13px;
 }
+.tt-pending-action {
+  flex: none;
+  margin: 0 auto 8px;
+  width: min(100% - 32px, 720px);
+  border: 1px solid #e7cf9d;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #fffaf0;
+  color: #3c3427;
+  font-size: 12px;
+}
+.tt-pending-action-heading {
+  font-weight: 650;
+}
+.tt-pending-action p {
+  margin: 5px 0;
+}
+.tt-pending-action details {
+  margin-top: 7px;
+}
+.tt-pending-action summary {
+  cursor: pointer;
+}
+.tt-approval-receipt {
+  font-size: 12px;
+  color: #55554f;
+}
+.tt-approval-receipt span {
+  color: #777771;
+}
 .tt-approval-heading {
   font-weight: 650;
 }

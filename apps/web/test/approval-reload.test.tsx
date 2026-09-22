@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ChatTransport, ConversationSummary, LiveSubscriptionHandlers } from "@turnturn/chat-client";
 import {
   DurableRecordTypes as Durable,
@@ -120,11 +120,14 @@ test("a saved pending edit approval survives a UI reload and Deny dispatches its
       </TransportProvider>,
     );
   mount();
-  expect(await screen.findByRole("button", { name: "Allow" })).toBeDefined();
+  expect(
+    within(await screen.findByRole("region", { name: "Pending action" })).getByRole("button", { name: "Allow" }),
+  ).toBeDefined();
   cleanup(); // the browser reload discards all React state and the in-memory store
   mount();
-  expect(await screen.findByRole("button", { name: "Deny" })).toBeDefined();
-  fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  const reminder = await screen.findByRole("region", { name: "Pending action" });
+  expect(within(reminder).getByRole("button", { name: "Deny" })).toBeDefined();
+  fireEvent.click(within(reminder).getByRole("button", { name: "Deny" }));
   await waitFor(() =>
     expect(transport.submitCommand).toHaveBeenCalledWith(
       expect.objectContaining({

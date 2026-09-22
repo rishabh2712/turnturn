@@ -40,6 +40,13 @@ A pending approval SHALL be derived from the recovered conversation state and SH
 - **THEN** the client refreshes from durable state and shows the current outcome
 - **AND** it does not claim a local button click authorized execution
 
+#### Scenario: A decision becomes a receipt
+
+- **GIVEN** an approval in the selected conversation
+- **WHEN** its durable resolution is recovered
+- **THEN** the interactive choice is replaced by a read-only Allowed or Denied receipt at the original tool action
+- **AND** Allowed does not claim that the tool itself completed successfully
+
 ### Requirement: Controls reflect supported turn states
 
 Stop SHALL be offered for an active turn backed by `turn.cancel`. Its pending, failure, and terminal outcomes SHALL be visible; a failed command SHALL NOT erase the user's draft or misrepresent a turn as stopped. Retry is outside this change because its meaning and command path are not yet defined.

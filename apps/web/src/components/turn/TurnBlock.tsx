@@ -1,11 +1,12 @@
 import type {
   ApprovalRequestItem,
+  ApprovalView,
   ToolActionPresentation,
   TraceSelection,
   TurnPresentation,
 } from "@turnturn/chat-client";
 import type { ApprovalDecisions, ConversationId } from "@turnturn/protocol";
-import { ApprovalCard } from "../approval/ApprovalCard";
+import { ApprovalCard, type ApprovalCommandStatus } from "../approval/ApprovalCard";
 import { MarkdownMessage } from "../markdown/MarkdownMessage";
 import { ToolActionCard } from "../tool/ToolActionCard";
 
@@ -14,14 +15,19 @@ export function TurnBlock({
   conversationId,
   onInspect,
   onResolveApproval,
+  approvalCommand,
+  approvalReceipts,
 }: {
   readonly turn: TurnPresentation;
   readonly conversationId: ConversationId;
   readonly onInspect: (selection: TraceSelection) => void;
-  readonly onResolveApproval: (
-    item: ApprovalRequestItem,
-    decision: ApprovalDecisions,
-  ) => Promise<"accepted" | "cancelled">;
+  readonly onResolveApproval: (item: ApprovalRequestItem, decision: ApprovalDecisions) => Promise<void>;
+  readonly approvalCommand?: {
+    readonly approvalId: string;
+    readonly status: ApprovalCommandStatus;
+    readonly message?: string;
+  };
+  readonly approvalReceipts: ReadonlyMap<string, ApprovalView>;
 }) {
   return (
     <article className="tt-turn" data-turn-id={turn.turnId}>
@@ -47,11 +53,37 @@ export function TurnBlock({
               {approvalFor(step.actions) === undefined ? null : (
                 <ApprovalCard
                   item={approvalFor(step.actions) as ApprovalRequestItem}
+                  status={
+                    approvalCommand !== undefined &&
+                    approvalCommand.approvalId === approvalFor(step.actions)?.approvalId
+                      ? approvalCommand.status
+                      : "pending"
+                  }
+                  error={
+                    approvalCommand !== undefined &&
+                    approvalCommand.approvalId === approvalFor(step.actions)?.approvalId
+                      ? approvalCommand.message
+                      : undefined
+                  }
                   onResolve={(decision) =>
                     onResolveApproval(approvalFor(step.actions) as ApprovalRequestItem, decision)
                   }
                 />
               )}
+              {step.actions.map((action) => {
+                const receipt = approvalReceipts.get(action.toolCallId);
+                if (receipt === undefined) return null;
+                return (
+                  <output className="tt-approval-receipt" key={receipt.approvalId}>
+                    {receipt.status === "allowed"
+                      ? "Allowed"
+                      : receipt.status === "denied"
+                        ? "Denied"
+                        : "Approval no longer pending"}
+                    <span> · {action.displayName}</span>
+                  </output>
+                );
+              })}
             </section>
           ))}
         </div>

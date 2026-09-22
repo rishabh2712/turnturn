@@ -7,6 +7,7 @@ import {
 import type { ConversationId } from "@turnturn/protocol";
 import { useEffect, useRef, useState } from "react";
 import { sendTurn } from "./client-actions";
+import { PendingActionBar } from "./components/approval/PendingActionBar";
 import { TurnInspector } from "./components/developer/TurnInspector";
 import { ModelPicker } from "./components/model/ModelPicker";
 import { ConversationSidebar } from "./components/shell/ConversationSidebar";
@@ -221,6 +222,7 @@ function ConversationPane(props: ConversationPaneProps) {
   });
   const { snapshot, presentation, loading, error, busy, submittedTurnId, modelProfileId, connected, blocked } =
     conversation;
+  const pendingApproval = conversation.pendingApproval;
 
   async function submit() {
     if (await conversation.submit(draft)) setDraft("");
@@ -277,6 +279,8 @@ function ConversationPane(props: ConversationPaneProps) {
               key={item.key}
               onInspect={setTraceSelection}
               onResolveApproval={conversation.answerApproval}
+              approvalCommand={conversation.approvalCommand}
+              approvalReceipts={conversation.approvalReceipts}
               turn={item}
             />
           ),
@@ -288,6 +292,14 @@ function ConversationPane(props: ConversationPaneProps) {
           </output>
         ) : null}
       </ConversationViewport>
+      {pendingApproval === undefined ? null : (
+        <PendingActionBar
+          item={pendingApproval}
+          status={conversation.approvalCommand?.status ?? "pending"}
+          error={conversation.approvalCommand?.message}
+          onResolve={(decision) => conversation.answerApproval(pendingApproval, decision)}
+        />
+      )}
       <Composer
         draft={draft}
         setDraft={setDraft}
