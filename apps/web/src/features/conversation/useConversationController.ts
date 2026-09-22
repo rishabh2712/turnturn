@@ -8,7 +8,7 @@ import {
 } from "@turnturn/chat-client";
 import type { ApprovalDecisions, ConversationId, TurnId } from "@turnturn/protocol";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { resolveApproval, sendTurn } from "../../client-actions";
+import { requestTurnCancel, resolveApproval, sendTurn } from "../../client-actions";
 
 interface ModelProfile {
   readonly id: string;
@@ -34,8 +34,10 @@ export function useConversationController(options: ConversationControllerOptions
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [submittedTurnId, setSubmittedTurnId] = useState<TurnId | undefined>();
+  const [cancelPendingTurnId, setCancelPendingTurnId] = useState<TurnId | undefined>();
   const [modelProfileId, setModelProfileId] = useState(options.defaultModelProfileId);
   const resume = useRef<ResumeController | undefined>(undefined);
+  const cancelRequested = useRef<TurnId | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -77,9 +79,23 @@ export function useConversationController(options: ConversationControllerOptions
     }
   }, [snapshot.view.items, submittedTurnId]);
 
+  useEffect(() => {
+    if (cancelPendingTurnId === undefined) return;
+    if (snapshot.view.items.some((item) => item.kind === "turn-status" && item.turnId === cancelPendingTurnId)) {
+      cancelRequested.current = undefined;
+      setCancelPendingTurnId(undefined);
+    }
+  }, [snapshot.view.items, cancelPendingTurnId]);
+
+  const presentation = composeConversationPresentation(snapshot.view);
   const connected = snapshot.connection.status === "connected";
   const canSend = !loading && !options.archived && (connected || snapshot.connection.status === "connecting");
   const blocked = busy || submittedTurnId !== undefined || snapshot.view.activeTurn !== undefined || !canSend;
+  const activeTurn = snapshot.view.activeTurn;
+  const cancellableTurn =
+    activeTurn?.canStop && !options.archived
+      ? presentation.timeline.find((item) => item.kind === "turn" && item.turnId === activeTurn.turnId)
+      : undefined;
 
   async function submit(input: string): Promise<boolean> {
     if (blocked || input.trim().length === 0) return false;
@@ -99,6 +115,32 @@ export function useConversationController(options: ConversationControllerOptions
       return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function cancelActiveTurn(): Promise<void> {
+    if (cancellableTurn?.kind !== "turn" || cancelRequested.current !== undefined) return;
+    const { sessionId, turnId } = cancellableTurn;
+    cancelRequested.current = turnId;
+    setCancelPendingTurnId(turnId);
+    setError(undefined);
+    let accepted = false;
+    try {
+      const result = await requestTurnCancel(transport, conversationId, sessionId, turnId);
+      accepted = result.kind !== "rejected";
+      await resume.current?.refresh(sessionId);
+      if (result.kind === "rejected") {
+        const terminal = store
+          .getSnapshot()
+          .view.items.some((item) => item.kind === "turn-status" && item.turnId === turnId);
+        if (!terminal) throw new Error(`${result.code}: ${result.message}`);
+      }
+    } catch (cause) {
+      setError(messageOf(cause));
+      if (!accepted) {
+        cancelRequested.current = undefined;
+        setCancelPendingTurnId(undefined);
+      }
     }
   }
 
@@ -130,15 +172,18 @@ export function useConversationController(options: ConversationControllerOptions
 
   return {
     snapshot,
-    presentation: composeConversationPresentation(snapshot.view),
+    presentation,
     loading,
     error,
     busy,
     submittedTurnId,
+    cancelPendingTurnId,
+    canStop: cancellableTurn !== undefined,
     modelProfileId,
     connected,
     blocked,
     submit,
+    cancelActiveTurn,
     answerApproval,
     switchModel,
   };

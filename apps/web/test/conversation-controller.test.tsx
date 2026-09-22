@@ -1,7 +1,17 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ChatTransport, ConversationStore, type LiveSubscriptionHandlers } from "@turnturn/chat-client";
-import { type ConversationId, formatConversationId, formatSessionId } from "@turnturn/protocol";
+import {
+  type ConversationId,
+  DurableRecordTypes as Durable,
+  type DurableRecord,
+  formatConversationId,
+  formatRecordId,
+  formatSessionId,
+  formatTurnId,
+  SCHEMA_VERSION,
+} from "@turnturn/protocol";
+import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useConversationController } from "../src/features/conversation/useConversationController";
@@ -114,5 +124,74 @@ test("an accepted send stays accepted when the sidebar refresh fails", async () 
   await waitFor(() => expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await screen.findByText("accepted");
+  expect(transport.submitCommand).toHaveBeenCalledTimes(1);
+});
+
+test("a rejected stale Stop refreshes but never claims the turn stopped", async () => {
+  const turnId = formatTurnId("55555555-5555-4555-8555-555555555555");
+  const record = (sequence: number, type: Durable, payload: object, scope: object = {}) =>
+    ({
+      schemaVersion: SCHEMA_VERSION,
+      recordId: formatRecordId(`66666666-6666-4666-8666-${String(sequence).padStart(12, "0")}`),
+      sequence,
+      type,
+      createdAt: "2026-09-22T00:00:00Z",
+      conversationId: firstId,
+      sessionId: firstSessionId,
+      ...scope,
+      payload,
+    }) as DurableRecord;
+  const records = [
+    record(1, Durable.ConversationCreated, {}),
+    record(2, Durable.SessionCreated, {}),
+    record(3, Durable.TurnStarted, { input: "Investigate" }, { turnId }),
+    record(4, Durable.UserInputAccepted, { text: "Investigate" }, { turnId }),
+  ];
+  expect(reduceEngineState(records).issues).toEqual([]);
+  const store = new ConversationStore(firstId);
+  store.registerSession(firstSessionId, 0);
+  for (const item of records) store.ingestRecord(firstSessionId, item);
+  const transport = {
+    getConversation: vi.fn(async () => ({
+      sessions: [{ sessionId: firstSessionId, ordinal: 0, provider: "test", model: "test" }],
+    })),
+    subscribeEvents: vi.fn((_id: ConversationId, handlers: LiveSubscriptionHandlers) => {
+      queueMicrotask(() => handlers.onSnapshot({ conversationId: firstId, serverInstanceId: "server", sessions: [] }));
+      return () => {};
+    }),
+    getRecords: vi.fn(async () => ({ sessionId: firstSessionId, records: [], lastSequence: 4, hasMore: false })),
+    submitCommand: vi.fn(async () => ({
+      kind: "rejected" as const,
+      code: "TURN_NOT_RUNNING",
+      message: "Turn is not running",
+    })),
+  } as unknown as ChatTransport;
+
+  function Selected() {
+    const controller = useConversationController({
+      conversationId: firstId,
+      store,
+      transport,
+      models: [],
+      defaultModelProfileId: "test",
+      onActivity: async () => {},
+    });
+    return (
+      <>
+        {controller.canStop ? (
+          <button type="button" onClick={() => void controller.cancelActiveTurn()}>
+            {controller.cancelPendingTurnId ? "Stopping…" : "Stop"}
+          </button>
+        ) : null}
+        {controller.error ? <output>{controller.error}</output> : null}
+      </>
+    );
+  }
+
+  render(<Selected />);
+  fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+  await screen.findByText("TURN_NOT_RUNNING: Turn is not running");
+  expect(screen.getByRole("button", { name: "Stop" })).toBeDefined();
+  expect(transport.getRecords).toHaveBeenCalledTimes(1);
   expect(transport.submitCommand).toHaveBeenCalledTimes(1);
 });

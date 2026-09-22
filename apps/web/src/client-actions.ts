@@ -1,4 +1,9 @@
-import type { ApprovalRequestItem, ChatTransport, ConversationStore } from "@turnturn/chat-client";
+import type {
+  ApprovalRequestItem,
+  ChatTransport,
+  ConversationStore,
+  TransportCommandResult,
+} from "@turnturn/chat-client";
 import {
   type ApprovalDecisions,
   CommandTypes,
@@ -6,6 +11,7 @@ import {
   formatCommandId,
   formatTurnId,
   SCHEMA_VERSION,
+  type SessionId,
   type TurnId,
 } from "@turnturn/protocol";
 
@@ -45,6 +51,27 @@ export async function sendTurn(
     store.clearOptimistic(session.sessionId);
     throw error;
   }
+}
+
+/** Sends a cancellation request; only a durable terminal record confirms the turn's outcome. */
+export function requestTurnCancel(
+  transport: ChatTransport,
+  conversationId: ConversationId,
+  sessionId: SessionId,
+  turnId: TurnId,
+): Promise<TransportCommandResult> {
+  const commandId = formatCommandId(crypto.randomUUID());
+  return transport.submitCommand({
+    schemaVersion: SCHEMA_VERSION,
+    commandId,
+    idempotencyKey: commandId,
+    type: CommandTypes.TurnCancel,
+    createdAt: new Date().toISOString(),
+    conversationId,
+    sessionId,
+    turnId,
+    payload: { reason: "Stopped by user" },
+  });
 }
 
 /** Resolves only the approval identified by the projected durable request. */

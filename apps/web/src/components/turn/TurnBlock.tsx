@@ -77,7 +77,9 @@ export function TurnBlock({
       )}
       {turn.outcome !== undefined && turn.outcome.status !== "completed" ? (
         <div className="tt-status-line">
-          Turn {turn.outcome.status}: {turn.outcome.error?.message ?? turn.outcome.reason}
+          {turn.outcome.status === "aborted" && turn.outcome.reason === "Stopped by user"
+            ? "Stopped"
+            : `Turn ${turn.outcome.status}: ${turn.outcome.error?.message ?? turn.outcome.reason}`}
         </div>
       ) : null}
     </article>

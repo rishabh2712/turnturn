@@ -292,13 +292,17 @@ function ConversationPane(props: ConversationPaneProps) {
         draft={draft}
         setDraft={setDraft}
         onSend={submit}
+        onStop={conversation.canStop ? conversation.cancelActiveTurn : undefined}
+        stopping={conversation.cancelPendingTurnId !== undefined}
         disabled={blocked}
         busy={busy}
         footer={`${props.workspaceName} · ${props.models.find((profile) => profile.id === modelProfileId)?.label ?? modelProfileId}`}
         hint={
-          props.archived
-            ? "Unarchive to continue"
-            : (snapshot.view.activeTurn?.phase ?? (submittedTurnId ? "Waiting for assistant" : undefined))
+          conversation.cancelPendingTurnId !== undefined
+            ? "Stopping…"
+            : props.archived
+              ? "Unarchive to continue"
+              : (snapshot.view.activeTurn?.phase ?? (submittedTurnId ? "Waiting for assistant" : undefined))
         }
       />
       {traceSelection === undefined ? null : (
@@ -334,6 +338,8 @@ interface ComposerProps {
   readonly draft: string;
   readonly setDraft: (text: string) => void;
   readonly onSend: () => void | Promise<void>;
+  readonly onStop?: () => void | Promise<void>;
+  readonly stopping?: boolean;
   readonly disabled: boolean;
   readonly busy: boolean;
   readonly footer: string;
@@ -363,9 +369,15 @@ function Composer(props: ComposerProps) {
       />
       <div className="tt-composer-bottom">
         <span>{props.hint ?? props.footer}</span>
-        <button type="submit" disabled={props.disabled || props.draft.trim().length === 0}>
-          {props.busy ? "Sending…" : "Send"}
-        </button>
+        {props.onStop === undefined ? (
+          <button type="submit" disabled={props.disabled || props.draft.trim().length === 0}>
+            {props.busy ? "Sending…" : "Send"}
+          </button>
+        ) : (
+          <button type="button" disabled={props.stopping} onClick={() => void props.onStop?.()}>
+            {props.stopping ? "Stopping…" : "Stop"}
+          </button>
+        )}
       </div>
     </form>
   );
