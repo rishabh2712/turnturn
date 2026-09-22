@@ -37,7 +37,7 @@ The failure that exposed this gap was simple: the model claimed that it had no t
 
 ### Modified Capabilities
 
-None. `openspec/specs/` has no accepted model-turn trace contract yet. This change complements the in-flight developer-mode requirement in `implement-coding-chat-workspace`; it does not redefine durable conversation state.
+None. `openspec/specs/` has no accepted model-turn trace contract yet. This change complements the historical developer-mode requirement in `archive/2026-09-22-implement-coding-chat-workspace`; it does not redefine durable conversation state.
 
 ## Impact
 

@@ -2,7 +2,7 @@
 
 Paste everything below the horizontal rule into a fresh agent session **with read access to this repo, its git history, and the three sibling reference repos** (`../codex`, `../gemini-cli`, `../claude-code`). The prompt assumes tool access, because the whole point is auditing real code rather than being told about it.
 
-Lives in `notes/` because that is where `architecture-walkthrough.md` lives — teaching material, not decisions. Decisions stay in `openspec/changes/implement-coding-chat-workspace/design.md`.
+Lives in `notes/` because that is where `architecture-walkthrough.md` lives — teaching material, not decisions. Historical decisions stay in `openspec/changes/archive/2026-09-22-implement-coding-chat-workspace/design.md`.
 
 ---
 
@@ -58,7 +58,7 @@ Adopt the tone in `.agents/skills/explain-like-teammate/SKILL.md` — read it fi
 ## Where the material is
 
 **This repo**
-- `openspec/changes/implement-coding-chat-workspace/design.md` — 26 numbered decisions, the projector design, the reconciliation algorithm, the risk register. Primary source.
+- `openspec/changes/archive/2026-09-22-implement-coding-chat-workspace/design.md` — historical design, projector and reconciliation decisions, and risk register. This change closed with remaining criteria waived, so do not treat every requirement as shipped.
 - `.../proposal.md`, `.../tasks.md` (progress checkboxes + a "Gotchas" section), `.../specs/*/spec.md`
 - `.../research/research.md` — verified reference citations. Use as an **index**; open the referenced files yourself. Do not recite it.
 - `openspec/changes/implement-sequential-agent-loop/design.md` — Decisions 1–12, contracts B1–B18. The engine underneath.

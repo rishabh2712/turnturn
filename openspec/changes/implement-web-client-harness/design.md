@@ -1,6 +1,6 @@
 # Design: Web Client Harness
 
-Status: historical harness design. The first server/client harness landed, but its global replay API and browser client are being superseded by `implement-coding-chat-workspace`; this document is not the current client contract.
+Status: historical harness design. The first server/client harness landed, but its global replay API and browser client were superseded by the partially closed `archive/2026-09-22-implement-coding-chat-workspace`; this document is not the current client contract.
 
 ## What we are building
 
@@ -185,7 +185,7 @@ B15 requires a clear boundary between replay and live delivery. HTTP cannot hold
 4. For each session, client fetches its scoped records after the last held sequence, taking records up to that session's snapshot cursor.
 5. Client then applies its buffered live events.
 
-Everything at or below a session's snapshot cursor comes from durable replay; later live events remain available from the already-registered subscriber. The server does not hold an append mutex across these HTTP requests. The current per-session contract and server-side boundary test live in `implement-coding-chat-workspace` Decision 8 and `packages/assistant-server/test/events-resume.test.mjs`. The old browser client has not implemented this new resume algorithm yet.
+Everything at or below a session's snapshot cursor comes from durable replay; later live events remain available from the already-registered subscriber. The server does not hold an append mutex across these HTTP requests. The later per-session design and server-side boundary test live in `../archive/2026-09-22-implement-coding-chat-workspace/design.md` Decision 8 and `packages/assistant-server/test/events-resume.test.mjs`. A real browser reconnect acceptance run remained unverified when that change closed.
 
 This is exactly the bug B15 exists to prevent, so the harness must have a test for it: append records concurrently with a subscribe, and assert every record is observed exactly once.
 

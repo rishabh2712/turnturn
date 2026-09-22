@@ -1,5 +1,13 @@
 # Tasks: Coding Chat Workspace
 
+## Closure — 2026-09-22
+
+**Closed by user-directed scope cut, not by satisfying every requirement.** Rishabh approved moving to the next prioritized work and explicitly waived the remaining acceptance criteria. The unchecked boxes below remain unchecked on purpose; they must not be reported as implemented or verified. This change is retained as historical design and task evidence, not promoted wholesale to `openspec/specs/`.
+
+What landed: file-backed session/conversation storage, conversation-scoped server APIs, a framework-free client projector and transport, basic chat UI, grouped tool presentation, model discovery and switching, rich message rendering, and on-demand trace inspection. Automated repository checks were green at closure. That does **not** prove a complete real-model coding turn in the browser.
+
+Carry forward as separate work: real end-to-end tool/edit/approval dogfooding and reconnect proof (D3–D5, 4.8, T12); frontend responsibility split and visual redesign (D33, 5B, remaining T4/T6); stop/retry/continue, approval visibility and recovery (T7/T8); accessibility and transport substitution checks (T10/T11). D31 and D32 remain unapproved proposals, not shipped behavior. The next OpenSpec must choose the smallest vertical slice from this list rather than silently inheriting every historical checkbox.
+
 Decisions are in `design.md` and are not repeated here — a task that cites `D7` means read Decision 7. Requirements are in `specs/`. Scope is in `ROADMAP.md`. Read all three before starting.
 
 ## Working Conventions

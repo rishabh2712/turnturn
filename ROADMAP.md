@@ -119,7 +119,7 @@ The OpenAI adapter is v1 scope but not necessarily Milestone 3 scope: it lands a
 
 ## Milestone 3.5: Coding Chat Workspace
 
-Status: design written 2026-09-12, awaiting review. Risk retired: is the engine usable as a product, or only observable?
+Status: **closed by scope cut on 2026-09-22, not accepted as complete.** The user waived the remaining acceptance criteria to prioritize the next product work. The shipped foundation is useful, but the live tool/edit/approval browser proof, several interaction and recovery tasks, and the frontend responsibility split remain open. Historical design and unchecked tasks remain in `openspec/changes/archive/2026-09-22-implement-coding-chat-workspace/`; its unverified spec delta was not promoted to accepted behavior. Risk still open: is the engine usable as a trustworthy coding product, rather than merely observable?
 
 Inserted rather than appended, on the information-gain rule. Milestone 3 produced an engine and an observability console for it. Milestones 4 through 6 all spend that engine through a human surface — approvals a person has to read, compaction they have to trust, diffs they have to review — and each is easier to design against a real client than to guess at. Building the approval UI in Milestone 4 without a client means building it twice.
 
@@ -127,7 +127,7 @@ Goal: turn the web harness into a coding chat workspace with durable conversatio
 
 OpenSpec change:
 
-- `implement-coding-chat-workspace`
+- `archive/2026-09-22-implement-coding-chat-workspace` (historical, partial)
 - `implement-model-turn-observability` — companion diagnostic trace and per-turn context inspector; design review is required before implementation.
 
 Exit criteria:

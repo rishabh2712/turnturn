@@ -2,7 +2,7 @@
 
 Working rule: implement only after `design.md` review. Keep the React client behind the transport boundary; do not import assistant-core into browser code.
 
-Historical harness checklist: checked boxes record work that landed for the original harness. The current server removed the global `/records` route and requires conversation-scoped `/events`; the existing browser client has not migrated. Current implementation work is tracked in `implement-coding-chat-workspace/tasks.md`.
+Historical harness checklist: checked boxes record work that landed for the original harness. The current server removed the global `/records` route and requires conversation-scoped `/events`; the browser client has since migrated. Remaining product work from the successor change is recorded, unchecked, in `../archive/2026-09-22-implement-coding-chat-workspace/tasks.md`.
 
 ## T0 — Project setup
 
