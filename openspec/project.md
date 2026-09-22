@@ -20,12 +20,18 @@ Reference repos are discovered relative to the turnturn repo root. In the expect
 - `../codex`
 - `../gemini-cli`
 - `../claude-code`
+- `../turnturn-references/ai-sdk`
+- `../turnturn-references/assistant-ui`
+- `../turnturn-references/tool-ui`
+- `../turnturn-references/open-webui`
 
 Agents should first resolve the turnturn repo root, then check these sibling paths. If a sibling repo is missing, record that limitation in the research artifact instead of hardcoding a machine-specific absolute path.
 
 Research artifacts created before 2026-09-09 refer to this third reference as `agentic-code`. That is the same reference under its former name; existing `research/agentic-code.md` files are not renamed.
 
 Use these repos as design evidence. Do not copy their structure wholesale.
+
+The `turnturn-references` siblings are local, read-only research snapshots, not workspace packages or runtime dependencies. Research records the commit inspected so later changes can distinguish a snapshot from current upstream behavior.
 
 ## Design Posture
 

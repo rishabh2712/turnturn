@@ -1,7 +1,7 @@
 # turnturn Roadmap
 
 Status: root source of truth for milestones
-Date: 2026-09-09
+Date: 2026-09-22
 
 ## Operating Rule
 
@@ -151,6 +151,19 @@ Exit criteria:
 - One real LiteLLM tool-using conversation completed end to end in the product UI, surviving a server restart.
 
 Deferred to v1.x by this milestone, named so they stop competing: queued turns, per-tool cancel, in-app workspace switching, multi-workspace, conversation search, attachments, transcript virtualization, and Electron packaging. Electron is a constraint on this milestone's seams, not a deliverable.
+
+## Priority reset: product before breadth (2026-09-22)
+
+The historical M3.5 change closed with acceptance waived; its unfinished work is not silently complete. The next work is ordered by what a person needs to trust and understand one coding turn, then by the foundations needed to extend it:
+
+1. **M3.6 — Product-grade coding turn.** Make one live, tool-using conversation understandable and controllable in the browser: streaming, tool work, approvals, Stop, reconnect, and an intentional chat UI. Give the frontend clear controller, presentation, and component ownership. OpenSpec: `implement-product-grade-coding-turn` (design approved 2026-09-22; implementation underway). Retry semantics and pre-apply edit guarantees require separate design; neither is implied by this UI slice.
+2. **M4 + M6 — Safety and edit trust.** Persistent policy, confinement, sandbox spike, recoverable edit failures, and a *pre-apply* diff/approval flow. These require their own design and, where contracts change, the full challenge/synthesis gate. A post-execution edit display is not a substitute.
+3. **M5 — Context economy.** Budget accounting, truncation, and compaction before a context-limit failure. Cross-session memory comes later, once its provenance and retention rules are designed.
+4. **Evaluation.** Run and retain a small, repeatable real-repository task set with outcome, turn count, cost, and failure classification. The v1 benchmark below remains report-only.
+5. **M7 + M8 — Durability close-out and operability.** Reconcile M7's remaining recall/writer-safety work against the session storage already delivered, then finish install, config, provider/auth, and cost surfaces.
+6. **v1.x breadth.** Parallel tool waves, cross-session memory, MCP, subagents, and background execution remain explicitly deferred. Each needs an independent contract and failure-mode design; none should be smuggled into the UI change.
+
+This order is a priority overlay, not a claim that earlier milestone exit criteria passed. The user waived the old M3.5 acceptance review, not future correctness tests or the design gate.
 
 ## Milestone 4: Trust Loop
 
