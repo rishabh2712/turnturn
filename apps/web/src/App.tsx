@@ -1,21 +1,18 @@
 import {
-  type ApprovalRequestItem,
   type ChatTransport,
   ConversationStore,
-  composeConversationPresentation,
   type ProviderCatalog,
-  type ResumeController,
-  resumeConversation,
   type TraceSelection,
 } from "@turnturn/chat-client";
-import type { ApprovalDecisions, ConversationId, TurnId } from "@turnturn/protocol";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { resolveApproval, sendTurn } from "./client-actions";
+import type { ConversationId } from "@turnturn/protocol";
+import { useEffect, useRef, useState } from "react";
+import { sendTurn } from "./client-actions";
 import { TurnInspector } from "./components/developer/TurnInspector";
 import { ModelPicker } from "./components/model/ModelPicker";
 import { ConversationSidebar } from "./components/shell/ConversationSidebar";
 import { TurnBlock } from "./components/turn/TurnBlock";
 import { ConversationViewport } from "./components/viewport/ConversationViewport";
+import { useConversationController } from "./features/conversation/useConversationController";
 import { WorkspaceFilePeekProvider } from "./features/file-preview/WorkspaceFilePeekProvider";
 import { ConversationListProvider, useConversationList } from "./providers/ConversationListProvider";
 import { RuntimeProvider, useRuntime } from "./providers/RuntimeProvider";
@@ -211,103 +208,23 @@ interface ConversationPaneProps {
 
 function ConversationPane(props: ConversationPaneProps) {
   const { conversationId, store, transport } = props;
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | undefined>();
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [submittedTurnId, setSubmittedTurnId] = useState<TurnId | undefined>();
   const [traceSelection, setTraceSelection] = useState<TraceSelection | undefined>();
-  const [modelProfileId, setModelProfileId] = useState(props.defaultModelProfileId);
-  const resume = useRef<ResumeController | undefined>(undefined);
-
-  useEffect(() => {
-    let active = true;
-    let stop: (() => void) | undefined;
-    void transport.getConversation(conversationId).then(
-      (detail) => {
-        if (!active) return;
-        for (const session of detail.sessions) {
-          store.registerSession(session.sessionId, session.ordinal, session.provider, session.model);
-        }
-        const latest = detail.sessions.at(-1);
-        setModelProfileId(
-          latest?.modelProfileId ??
-            props.models.find((profile) => profile.provider === latest?.provider && profile.model === latest?.model)
-              ?.id ??
-            props.defaultModelProfileId,
-        );
-        resume.current = resumeConversation(transport, store, conversationId);
-        stop = resume.current.stop;
-        setLoading(false);
-      },
-      (cause: unknown) => {
-        if (!active) return;
-        setError(messageOf(cause));
-        setLoading(false);
-      },
-    );
-    return () => {
-      active = false;
-      stop?.();
-      resume.current = undefined;
-    };
-  }, [transport, store, conversationId]);
-
-  useEffect(() => {
-    if (submittedTurnId === undefined) return;
-    if (snapshot.view.items.some((item) => item.kind === "turn-status" && item.turnId === submittedTurnId)) {
-      setSubmittedTurnId(undefined);
-    }
-  }, [snapshot.view.items, submittedTurnId]);
+  const conversation = useConversationController({
+    conversationId,
+    store,
+    transport,
+    models: props.models,
+    defaultModelProfileId: props.defaultModelProfileId,
+    onActivity: props.onActivity,
+    archived: props.archived,
+  });
+  const { snapshot, presentation, loading, error, busy, submittedTurnId, modelProfileId, connected, blocked } =
+    conversation;
 
   async function submit() {
-    if (busy || submittedTurnId !== undefined || snapshot.view.activeTurn !== undefined || draft.trim().length === 0)
-      return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const turnId = await sendTurn(transport, store, conversationId, draft, modelProfileId);
-      setSubmittedTurnId(turnId);
-      setDraft("");
-      await props.onActivity();
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      setBusy(false);
-    }
+    if (await conversation.submit(draft)) setDraft("");
   }
-
-  async function answerApproval(
-    item: ApprovalRequestItem,
-    decision: ApprovalDecisions,
-  ): Promise<"accepted" | "cancelled"> {
-    const outcome = await resolveApproval(transport, conversationId, item, decision);
-    await resume.current?.refresh(item.sessionId);
-    return outcome;
-  }
-
-  async function switchModel(nextProfileId: string) {
-    if (blocked || nextProfileId === modelProfileId) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const session = await transport.activateConversation(conversationId, { modelProfileId: nextProfileId });
-      store.registerSession(session.sessionId, session.ordinal, session.provider, session.model);
-      setModelProfileId(nextProfileId);
-      await resume.current?.refresh(session.sessionId);
-      await props.onActivity();
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const connected = snapshot.connection.status === "connected";
-  const canSend = !loading && !props.archived && (connected || snapshot.connection.status === "connecting");
-  const blocked = busy || submittedTurnId !== undefined || snapshot.view.activeTurn !== undefined || !canSend;
-  const presentation = composeConversationPresentation(snapshot.view);
 
   return (
     <div className="tt-conversation">
@@ -323,7 +240,7 @@ function ConversationPane(props: ConversationPaneProps) {
             catalog={props.catalog}
             currentLabel={props.models.find((profile) => profile.id === modelProfileId)?.model}
             value={modelProfileId}
-            onChange={(value) => void switchModel(value)}
+            onChange={(value) => void conversation.switchModel(value)}
             onRefresh={() => void props.onRefreshCatalog()}
             refreshing={props.refreshingCatalog}
           />
@@ -359,7 +276,7 @@ function ConversationPane(props: ConversationPaneProps) {
               conversationId={conversationId}
               key={item.key}
               onInspect={setTraceSelection}
-              onResolveApproval={answerApproval}
+              onResolveApproval={conversation.answerApproval}
               turn={item}
             />
           ),
