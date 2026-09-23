@@ -141,8 +141,11 @@ export class RecordEmitter {
     command: CommandEnvelope,
     scope: Required<Pick<RecordScope, "conversationId" | "sessionId" | "turnId" | "toolCallId" | "approvalId">>,
     reason: string,
+    onPersisted?: () => void,
   ): Promise<DurableRecord<typeof Durable.ApprovalRequested>> {
     const record = await this.append(command, Durable.ApprovalRequested, scope, { reason });
+    // Register the waiter after durability, before clients can observe the live request.
+    onPersisted?.();
     await this.publishLive(Live.ApprovalRequested, scope, { reason });
     return record;
   }

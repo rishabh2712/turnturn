@@ -119,13 +119,8 @@ export class TurnRunner {
     turn: TurnExecution,
     step: Awaited<ReturnType<ProviderStepRunner["run"]>>,
   ): Promise<void> {
-    await this.toolWaves.abortOutstanding(
-      turn.command,
-      step.stepId,
-      step.toolCalls,
-      turn.runtime.cancelReason,
-      turn.observation,
-    );
+    // Calls emitted by a cancelled provider step were never admitted as
+    // tool.requested, so there is no tool lifecycle to close.
     await this.options.records.providerStepCompleted(
       turn.command,
       { ...turn.command, stepId: step.stepId },

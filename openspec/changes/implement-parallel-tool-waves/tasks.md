@@ -37,9 +37,11 @@ Run `node scripts/check-milestone-gate.mjs implement-parallel-tool-waves` before
 
 ### 2. Execute read-only waves
 
+- [x] Coordinator slice: separate inspection from durable effects; drain earlier requested reads before approval, denial, abort, invalid input, or mutating barriers. Abort queued requests on policy/validation exception before `turn.failed`; do not admit later calls after cancellation. Four deterministic tests cover these boundaries. Inspection and wave execution now have separate internal modules; the core suite passes 111/111. This does not close the broader Step 2 or Step 3 scenarios below.
 - [ ] Refactor `ToolWaveRunner` so preparation and execution are separable without duplicating validation/policy. Make the Step 0 overlap test green and prove `[read, read, edit, read]` never lets the final read overtake the edit.
 - [ ] Dispatch admitted reads concurrently, collect one logical outcome keyed by `toolCallId` for each, and append terminal results in provider order. Test reversed completion order, mixed success/recoverable failure, timeout, executor throw, `allow-modified` revalidation, denial, policy abort, and an `ask` decision between reads. A tool failure must not cancel a sibling; a policy abort intentionally cancels the turn.
 - [ ] Reconcile the stale `ToolExecutorPort.execute` comment with the runner's tested nonfatal executor-throw behavior, without changing the port signature. Test a validation/policy-service exception after earlier siblings were requested: terminate those requests before failing the turn; do not recast the exception as one tool's recoverable failure.
+- [x] Fix the approval visibility race found during coordinator testing: `approval.requested` is durable, the waiter registers, then the live event publishes. A live sink that resolves immediately now succeeds on its first attempt; both reducers report no issues.
 
 ### 3. Cancellation and replay
 

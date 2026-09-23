@@ -2,23 +2,15 @@ import {
   ApprovalDecisions,
   type CommandEnvelope,
   type CommandTypes,
-  type JsonValue,
   type SerializedError,
   type StepId,
-  type ToolCallId,
 } from "@turnturn/protocol";
 import type { ApprovalRegistry } from "./approval-registry.js";
-import type { ToolObservationScope, TurnObservation } from "./observability/types.js";
-import type {
-  EngineIds,
-  PolicyDecision,
-  ProviderToolCall,
-  ToolExecutorPort,
-  ToolInputValidation,
-  ToolOutcome,
-  ToolPolicyPort,
-} from "./ports.js";
+import type { TurnObservation } from "./observability/types.js";
+import type { EngineIds, ProviderToolCall, ToolExecutorPort, ToolPolicyPort } from "./ports.js";
 import type { RecordEmitter } from "./records.js";
+import { type InspectedCall, ToolCallInspector } from "./tool-call-inspector.js";
+import { cancellationError, ToolWaveExecutor } from "./tool-wave-executor.js";
 import type { TurnRuntime } from "./turn-runtime.js";
 import { classifyToolCall } from "./wave-planner.js";
 
@@ -30,18 +22,15 @@ export interface ToolWaveRunnerOptions {
   readonly approvals: ApprovalRegistry;
 }
 
-interface PreparedCall {
-  readonly providerOrder: number;
-  readonly call: ProviderToolCall;
-  readonly toolCallId: ToolCallId;
-  readonly scope: ToolObservationScope;
-  readonly validatedInput: JsonValue;
-  readonly decision: PolicyDecision;
-  readonly executable: boolean;
-}
-
+/** Schedules calls. Inspection decides eligibility; execution owns the admitted call lifecycle. */
 export class ToolWaveRunner {
-  constructor(private readonly options: ToolWaveRunnerOptions) {}
+  private readonly inspector: ToolCallInspector;
+  private readonly executor: ToolWaveExecutor;
+
+  constructor(private readonly options: ToolWaveRunnerOptions) {
+    this.inspector = new ToolCallInspector(options.ids, options.policy, options.tools);
+    this.executor = new ToolWaveExecutor(options.records, options.tools);
+  }
 
   async run(
     command: CommandEnvelope<CommandTypes.TurnSubmit>,
@@ -51,527 +40,134 @@ export class ToolWaveRunner {
     observation: TurnObservation,
   ): Promise<void> {
     const toolDefs = this.options.tools.definitions();
-    let currentWave: PreparedCall[] = [];
-    let remainingCalls = Array.from(toolCalls);
-
-    while (remainingCalls.length > 0 && !running.isCancelled) {
-      const call = remainingCalls[0]!;
-      const providerOrder = toolCalls.length - remainingCalls.length;
-
-      // Check if this call is a barrier (not a known read-only tool)
-      const classification = classifyToolCall(call, toolDefs);
-      if (classification.isBarrier) {
-        // Flush current wave before handling barrier
-        if (currentWave.length > 0) {
-          await this.executeWave(command, currentWave, running, observation);
-          currentWave = [];
-        }
-        // Handle barrier call sequentially
-        await this.executeSequentialCall(command, stepId, call, providerOrder, running, observation);
-        remainingCalls = remainingCalls.slice(1);
-        continue;
-      }
-
-      // INVARIANT: Approval gates block wave building. Don't check policy here;
-      // instead, pass approval-required calls through executeSequentialCall which
-      // calls prepareCall (discovers approval need) → flushes wave → waits for approval.
-      // This avoids opening approval with queued calls.
-
-      // Optimization: Only prepare if unlikely to need approval (read-only allowlisted tools).
-      // For unknown tools or non-read-only, go sequential to play it safe.
-      // We prepare here as a fast path for common case (read/glob/grep with allow policy).
-      const prepared = await this.prepareCall(command, stepId, call, providerOrder, running, observation);
-
-      if (prepared === null) {
-        // Validation error or invalid input - prepareCall already handled it
-        remainingCalls = remainingCalls.slice(1);
-        continue;
-      }
-
-      // If approval is needed, we must have already handled it in prepareCall
-      // (which waits for it internally). But if we're here, approval was resolved.
-      // However, to be safe and respect wave atomicity, if this call required approval,
-      // flush any queued wave before adding the approved call.
-      // INVARIANT 1: Flush wave before admitting approved call (approval gate opens otherwise)
-      if (prepared.decision.kind === "ask") {
-        if (currentWave.length > 0) {
-          await this.executeWave(command, currentWave, running, observation);
-          currentWave = [];
-        }
-      }
-
-      // Add executable call to current wave
-      currentWave.push(prepared);
-      remainingCalls = remainingCalls.slice(1);
-
-      // If wave is full, flush it
-      if (currentWave.length === 4) {
-        await this.executeWave(command, currentWave, running, observation);
-        currentWave = [];
-      }
-    }
-
-    // INVARIANT: All admitted calls must reach terminal outcome before run() returns.
-    // If turn cancels mid-wave-build, currentWave holds calls that have already
-    // recorded toolRequested. They must reach terminal (aborted) or engine state
-    // will be inconsistent (request without result).
-    if (currentWave.length > 0) {
-      if (!running.isCancelled) {
-        // Normal case: execute queued wave
-        await this.executeWave(command, currentWave, running, observation);
-      } else {
-        // Cancellation case: abort all queued calls
-        for (const prepared of currentWave) {
-          await this.options.records.toolAborted(
-            command,
-            { ...command, toolCallId: prepared.toolCallId },
-            syntheticError("TURN_CANCELLED", running.cancelReason ?? "Turn cancelled"),
-          );
-          observation.observeTool({
-            type: "result-recorded",
-            scope: prepared.scope,
-            result: {
-              status: "aborted",
-              error: syntheticError("TURN_CANCELLED", running.cancelReason ?? "Turn cancelled"),
-            },
-          });
-        }
-      }
-    }
-
-    // Note: remainingCalls should be empty at this point if all calls were processed.
-    // If any remain, they were never admitted (never prepared), so no request was recorded.
-    // The design does NOT record request/result pairs for unadmitted calls.
-  }
-
-  async abortOutstanding(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    stepId: StepId,
-    toolCalls: readonly ProviderToolCall[],
-    reason: string | undefined,
-    observation: TurnObservation,
-  ): Promise<void> {
-    for (const [providerOrder, call] of toolCalls.entries()) {
-      await this.recordSkippedToolAbort(command, stepId, call, providerOrder, reason, observation);
-    }
-  }
-
-  private async prepareCall(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    stepId: StepId,
-    call: ProviderToolCall,
-    providerOrder: number,
-    running: TurnRuntime,
-    observation: TurnObservation,
-  ): Promise<PreparedCall | null> {
-    const toolCallId = this.options.ids.toolCallId();
-    const scope = toolObservationScope(command, stepId, toolCallId, call.callId);
-
-    // Validate input
-    observation.observeTool({
-      type: "validation-input",
-      scope,
-      phase: "provider",
-      name: call.name,
-      input: call.input,
-    });
-
-    const providerInput = this.options.tools.validate({ name: call.name, input: call.input });
-    observation.observeTool({ type: "validation-result", scope, phase: "provider", result: providerInput });
-
-    if (!providerInput.ok) {
-      await this.recordInvalidToolInput(
-        command,
-        stepId,
-        toolCallId,
-        call,
-        providerOrder,
-        call.input,
-        providerInput.error,
-        observation,
-        scope,
-      );
-      return null;
-    }
-
-    // Get policy decision
-    const decision = await this.options.policy.decide({
-      conversationId: command.conversationId,
-      sessionId: command.sessionId,
-      turnId: command.turnId,
-      toolCallId,
-      name: call.name,
-      input: providerInput.input,
-    });
-
-    observation.observeTool({ type: "policy-decision", scope, decision });
-
-    // Revalidate if policy modified input
-    let validatedInput = providerInput.input;
-    if (decision.kind === "allow-modified") {
-      observation.observeTool({
-        type: "validation-input",
-        scope,
-        phase: "policy-modified",
-        name: call.name,
-        input: decision.input,
-      });
-
-      const policyInput = this.options.tools.validate({ name: call.name, input: decision.input });
-      observation.observeTool({ type: "validation-result", scope, phase: "policy-modified", result: policyInput });
-
-      if (!policyInput.ok) {
-        await this.recordInvalidToolInput(
-          command,
-          stepId,
-          toolCallId,
-          call,
-          providerOrder,
-          decision.input,
-          policyInput.error,
-          observation,
-          scope,
-        );
-        return null;
-      }
-
-      validatedInput = policyInput.input;
-    }
-
-    // Handle non-executable decisions
-    if (decision.kind === "deny") {
-      await this.options.records.toolRequested(
-        command,
-        { ...command, stepId, toolCallId },
-        {
-          name: call.name,
-          input: validatedInput,
-          providerOrder,
-          requiresApproval: false,
-          providerToolCallId: call.callId,
-        },
-      );
-      await this.options.records.toolDenied(command, { ...command, toolCallId }, decision.error);
-      observation.observeTool({
-        type: "result-recorded",
-        scope,
-        result: { status: "denied", error: decision.error },
-      });
-      return null;
-    }
-
-    if (decision.kind === "abort") {
-      await this.options.records.toolRequested(
-        command,
-        { ...command, stepId, toolCallId },
-        {
-          name: call.name,
-          input: validatedInput,
-          providerOrder,
-          requiresApproval: false,
-          providerToolCallId: call.callId,
-        },
-      );
-      await this.options.records.toolAborted(command, { ...command, toolCallId }, decision.error);
-      observation.observeTool({
-        type: "result-recorded",
-        scope,
-        result: { status: "aborted", error: decision.error },
-      });
-      running.requestCancel(decision.error.message);
-      return null;
-    }
-
-    if (decision.kind === "ask") {
-      // Approval required; cannot admit to wave
-      // (Wave flushing happens in main run() loop before calling prepareCall for approved calls)
-      await this.options.records.toolRequested(
-        command,
-        { ...command, stepId, toolCallId },
-        {
-          name: call.name,
-          input: validatedInput,
-          providerOrder,
-          requiresApproval: true,
-          providerToolCallId: call.callId,
-        },
-      );
-      const approvalId = this.options.ids.approvalId();
-      await this.options.records.approvalRequested(command, { ...command, toolCallId, approvalId }, decision.reason);
-      const approvalScope = { ...scope, approvalId };
-      observation.observeApproval({ type: "requested", scope: approvalScope, reason: decision.reason });
-
-      const approvalDecision = await this.options.approvals.wait(
-        {
-          conversationId: command.conversationId,
-          sessionId: command.sessionId,
-          turnId: command.turnId,
-          toolCallId,
-          approvalId,
-        },
-        running.signal,
-      );
-
-      observation.observeApproval({ type: "resolved", scope: approvalScope, decision: approvalDecision });
-
-      if (running.isCancelled) {
-        await this.options.records.toolAborted(
-          command,
-          { ...command, toolCallId },
-          syntheticError("TURN_CANCELLED", running.cancelReason ?? "Turn cancelled"),
-        );
-        observation.observeTool({
-          type: "result-recorded",
-          scope,
-          result: {
-            status: "aborted",
-            error: syntheticError("TURN_CANCELLED", running.cancelReason ?? "Turn cancelled"),
-          },
-        });
-        return null;
-      }
-
-      if (approvalDecision === ApprovalDecisions.Deny) {
-        const denial = syntheticError("APPROVAL_DENIED", "Approval denied");
-        await this.options.records.toolDenied(command, { ...command, toolCallId }, denial);
-        observation.observeTool({ type: "result-recorded", scope, result: { status: "denied", error: denial } });
-        return null;
-      }
-
-      // Approval granted; proceed to execution
-    }
-
-    // Record request and prepare for execution (if not already recorded during ask gate)
-    if (decision.kind !== "ask") {
-      await this.options.records.toolRequested(
-        command,
-        { ...command, stepId, toolCallId },
-        {
-          name: call.name,
-          input: validatedInput,
-          providerOrder,
-          requiresApproval: false,
-          providerToolCallId: call.callId,
-        },
-      );
-    }
-
-    return {
-      providerOrder,
-      call,
-      toolCallId,
-      scope,
-      validatedInput,
-      decision,
-      executable: true,
+    const wave: InspectedCall[] = [];
+    const drain = async (error?: SerializedError) => {
+      const pending = wave.splice(0);
+      if (pending.length === 0) return;
+      if (error) await this.executor.abort(command, pending, error, observation);
+      else await this.executor.execute(command, pending, running, observation);
     };
-  }
 
-  private async executeWave(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    prepared: readonly PreparedCall[],
-    running: TurnRuntime,
-    observation: TurnObservation,
-  ): Promise<void> {
-    // Record that all calls started
-    for (const p of prepared) {
-      await this.options.records.toolStarted({ ...command, toolCallId: p.toolCallId }, p.call.name);
-      observation.observeTool({
-        type: "execution-started",
-        scope: p.scope,
-        name: p.call.name,
-        input: p.validatedInput,
-      });
-    }
+    for (const [providerOrder, call] of toolCalls.entries()) {
+      if (running.isCancelled) break;
+      const barrier = classifyToolCall(call, toolDefs).isBarrier;
+      if (barrier) await drain(running.isCancelled ? cancellationError(running) : undefined);
+      if (running.isCancelled) break;
 
-    // Execute all calls concurrently
-    const outcomes = await Promise.all(
-      prepared.map(async (p) => {
-        try {
-          const outcome = await this.options.tools.execute({
-            conversationId: command.conversationId,
-            sessionId: command.sessionId,
-            turnId: command.turnId,
-            toolCallId: p.toolCallId,
-            name: p.call.name,
-            input: p.validatedInput,
-            signal: running.signal,
-            callbacks: {
-              stdout: (text) => {
-                observation.observeTool({
-                  type: "execution-output",
-                  scope: p.scope,
-                  stream: "stdout",
-                  text,
-                });
-                void this.options.records.stdoutDelta({ ...command, toolCallId: p.toolCallId }, text);
-              },
-              stderr: (text) => {
-                observation.observeTool({
-                  type: "execution-output",
-                  scope: p.scope,
-                  stream: "stderr",
-                  text,
-                });
-                void this.options.records.stderrDelta({ ...command, toolCallId: p.toolCallId }, text);
-              },
-              progress: (message) => {
-                observation.observeTool({
-                  type: "execution-output",
-                  scope: p.scope,
-                  stream: "progress",
-                  text: message,
-                });
-                void this.options.records.toolProgress({ ...command, toolCallId: p.toolCallId }, message);
-              },
-            },
-          });
-          return { toolCallId: p.toolCallId, scope: p.scope, outcome };
-        } catch (error) {
-          return {
-            toolCallId: p.toolCallId,
-            scope: p.scope,
-            outcome: {
-              kind: "failed" as const,
-              error: serializeThrown(error, "TOOL_EXECUTOR_THROWN"),
-            },
-          };
-        }
-      }),
-    );
+      let inspected: InspectedCall;
+      try {
+        inspected = await this.inspector.inspect(command, stepId, call, providerOrder, observation);
+      } catch (error) {
+        await drain(syntheticError("TOOL_PREPARATION_ABORTED", "A later tool could not be prepared"));
+        throw error;
+      }
+      if (running.isCancelled) break;
 
-    // Record results in provider order
-    for (const { toolCallId, scope, outcome } of outcomes) {
-      observation.observeTool({ type: "execution-finished", scope, outcome });
-
-      const cancellation = running.isCancelled ? cancellationMetadata(running.cancelReason) : undefined;
-
-      if (outcome.kind === "completed") {
-        await this.options.records.toolCompleted(command, { ...command, toolCallId }, outcome.output, cancellation);
-        observation.observeTool({
-          type: "result-recorded",
-          scope,
-          result: { status: "completed", output: outcome.output },
-          ...(cancellation === undefined ? {} : { cancellation }),
-        });
+      if (!barrier && canJoinWave(inspected)) {
+        await this.recordRequest(command, stepId, inspected);
+        wave.push(inspected);
+        if (wave.length === 4) await drain(running.isCancelled ? cancellationError(running) : undefined);
       } else {
-        await this.options.records.toolFailed(command, { ...command, toolCallId }, outcome.error, cancellation);
-        observation.observeTool({
-          type: "result-recorded",
-          scope,
-          result: { status: "failed", error: outcome.error },
-          ...(cancellation === undefined ? {} : { cancellation }),
-        });
+        await drain(running.isCancelled ? cancellationError(running) : undefined);
+        if (running.isCancelled) break;
+        await this.runBarrier(command, stepId, inspected, running, observation);
       }
     }
+    await drain(running.isCancelled ? cancellationError(running) : undefined);
   }
 
-  private async executeSequentialCall(
+  private async recordRequest(
     command: CommandEnvelope<CommandTypes.TurnSubmit>,
     stepId: StepId,
-    call: ProviderToolCall,
-    providerOrder: number,
+    call: InspectedCall,
+  ): Promise<void> {
+    await this.options.records.toolRequested(
+      command,
+      { ...command, stepId, toolCallId: call.toolCallId },
+      {
+        name: call.call.name,
+        input: call.input,
+        providerOrder: call.providerOrder,
+        requiresApproval: call.decision.kind === "ask",
+        providerToolCallId: call.call.callId,
+      },
+    );
+  }
+
+  private async runBarrier(
+    command: CommandEnvelope<CommandTypes.TurnSubmit>,
+    stepId: StepId,
+    call: InspectedCall,
     running: TurnRuntime,
     observation: TurnObservation,
   ): Promise<void> {
-    const prepared = await this.prepareCall(command, stepId, call, providerOrder, running, observation);
-    if (prepared === null) {
+    await this.recordRequest(command, stepId, call);
+    if (running.isCancelled) {
+      await this.executor.abort(command, [call], cancellationError(running), observation);
       return;
     }
-
-    // Execute single call
-    await this.executeWave(command, [prepared], running, observation);
-  }
-
-  private async recordInvalidToolInput(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    stepId: StepId,
-    toolCallId: ToolCallId,
-    call: ProviderToolCall,
-    providerOrder: number,
-    input: JsonValue,
-    error: SerializedError,
-    observation: TurnObservation,
-    scope: ToolObservationScope,
-  ): Promise<void> {
-    await this.options.records.toolRequested(
-      command,
-      { ...command, stepId, toolCallId },
-      {
-        name: call.name,
-        input,
-        providerOrder,
-        requiresApproval: false,
-        providerToolCallId: call.callId,
-      },
-    );
-    await this.options.records.toolFailed(command, { ...command, toolCallId }, error);
-    observation.observeTool({ type: "result-recorded", scope, result: { status: "failed", error } });
-  }
-
-  private async recordSkippedToolAbort(
-    command: CommandEnvelope<CommandTypes.TurnSubmit>,
-    stepId: StepId,
-    call: ProviderToolCall,
-    providerOrder: number,
-    reason: string | undefined,
-    observation: TurnObservation,
-  ): Promise<void> {
-    const toolCallId = this.options.ids.toolCallId();
-    const scope = toolObservationScope(command, stepId, toolCallId, call.callId);
-    observation.observeTool({
-      type: "validation-input",
-      scope,
-      phase: "provider",
-      name: call.name,
-      input: call.input,
-    });
-    await this.options.records.toolRequested(
-      command,
-      { ...command, stepId, toolCallId },
-      {
-        name: call.name,
-        input: call.input,
-        providerOrder,
-        requiresApproval: false,
-        providerToolCallId: call.callId,
-      },
-    );
-    const error = syntheticError("TURN_CANCELLED", reason ?? "Turn cancelled");
-    await this.options.records.toolAborted(command, { ...command, toolCallId }, error);
-    observation.observeTool({ type: "result-recorded", scope, result: { status: "aborted", error } });
+    const { decision, toolCallId, scope } = call;
+    if (decision.kind === "invalid" || decision.kind === "deny" || decision.kind === "abort") {
+      const { error } = decision;
+      if (decision.kind === "invalid")
+        await this.options.records.toolFailed(command, { ...command, toolCallId }, error);
+      else if (decision.kind === "deny")
+        await this.options.records.toolDenied(command, { ...command, toolCallId }, error);
+      else await this.options.records.toolAborted(command, { ...command, toolCallId }, error);
+      const status = decision.kind === "invalid" ? "failed" : decision.kind === "deny" ? "denied" : "aborted";
+      observation.observeTool({ type: "result-recorded", scope, result: { status, error } });
+      if (decision.kind === "abort") running.requestCancel(error.message);
+      return;
+    }
+    if (decision.kind === "ask") {
+      const approvalId = this.options.ids.approvalId();
+      const approvalScope = { ...scope, approvalId };
+      let pendingDecision: Promise<ApprovalDecisions> | undefined;
+      await this.options.records.approvalRequested(
+        command,
+        { ...command, toolCallId, approvalId },
+        decision.reason,
+        () => {
+          pendingDecision = this.options.approvals.wait(
+            {
+              conversationId: command.conversationId,
+              sessionId: command.sessionId,
+              turnId: command.turnId,
+              toolCallId,
+              approvalId,
+            },
+            running.signal,
+          );
+          observation.observeApproval({ type: "requested", scope: approvalScope, reason: decision.reason });
+        },
+      );
+      if (!pendingDecision) throw new Error("Approval waiter was not registered after persistence");
+      const approvalDecision = await pendingDecision;
+      if (running.isCancelled) {
+        observation.observeApproval({
+          type: "cancelled",
+          scope: approvalScope,
+          ...(running.cancelReason === undefined ? {} : { reason: running.cancelReason }),
+        });
+        await this.executor.abort(command, [call], cancellationError(running), observation);
+        return;
+      }
+      observation.observeApproval({ type: "resolved", scope: approvalScope, decision: approvalDecision });
+      if (approvalDecision === ApprovalDecisions.Deny) {
+        const error = syntheticError("APPROVAL_DENIED", "Approval denied");
+        await this.options.records.toolDenied(command, { ...command, toolCallId }, error);
+        observation.observeTool({ type: "result-recorded", scope, result: { status: "denied", error } });
+        return;
+      }
+    }
+    await this.executor.execute(command, [call], running, observation);
   }
 }
 
-function serializeThrown(error: unknown, code: string): SerializedError {
-  return {
-    code,
-    message: error instanceof Error ? error.message : String(error),
-    retryable: false,
-    fatal: true,
-  };
+function canJoinWave(call: InspectedCall): boolean {
+  return call.decision.kind === "allow" || call.decision.kind === "allow-modified";
 }
 
 function syntheticError(code: string, message: string): SerializedError {
   return { code, message, retryable: false, fatal: false };
-}
-
-function cancellationMetadata(reason: string | undefined): { readonly requested: true; readonly reason?: string } {
-  return reason === undefined ? { requested: true } : { requested: true, reason };
-}
-
-function toolObservationScope(
-  command: CommandEnvelope<CommandTypes.TurnSubmit>,
-  stepId: StepId,
-  toolCallId: ToolCallId,
-  providerToolCallId: string,
-): ToolObservationScope {
-  return {
-    conversationId: command.conversationId,
-    sessionId: command.sessionId,
-    turnId: command.turnId,
-    stepId,
-    toolCallId,
-    providerToolCallId,
-  };
 }

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CommandTypes, formatCommandId, formatConversationId, formatSessionId, formatTurnId } from "@turnturn/protocol";
+import {
+  ApprovalDecisions,
+  CommandTypes,
+  DurableRecordTypes,
+  formatCommandId,
+  formatConversationId,
+  formatSessionId,
+  formatTurnId,
+} from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
 import { createAssistantEngine } from "../dist/engine.js";
@@ -35,9 +43,14 @@ function command(type, payload, scope = {}, n = 1) {
   };
 }
 
-async function seededEngine({ provider, policy, tools, observation } = {}) {
-  const durable = new MemoryDurableSink();
-  const live = new MemoryLiveSink();
+async function seededEngine({
+  provider,
+  policy,
+  tools,
+  observation,
+  durable = new MemoryDurableSink(),
+  live = new MemoryLiveSink(),
+} = {}) {
   const engine = createAssistantEngine({
     provider: provider ?? new ScriptedProvider([[{ type: "completed", reason: "complete" }]]),
     policy: policy ?? new StaticPolicy(),
@@ -53,6 +66,249 @@ async function seededEngine({ provider, policy, tools, observation } = {}) {
   await engine.submit(command(CommandTypes.SessionCreate, { provider: "scripted" }, {}, 2));
   return { engine, durable, live };
 }
+
+const readDefinitions = [{ name: "read", description: "Read a file", parameters: {}, mutating: false }];
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function toolCall(callId, path) {
+  return { type: "tool-call-complete", call: { callId, name: "read", input: { path } } };
+}
+
+function terminalFor(records, callId) {
+  const request = records.find(
+    (record) => record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === callId,
+  );
+  return records.find(
+    (record) =>
+      record.toolCallId === request?.toolCallId &&
+      [
+        DurableRecordTypes.ToolResultCompleted,
+        DurableRecordTypes.ToolResultFailed,
+        DurableRecordTypes.ToolResultDenied,
+        DurableRecordTypes.ToolResultAborted,
+      ].includes(record.type),
+  );
+}
+
+test("a read approval opens only after earlier read result is durable", async () => {
+  const approvalWritten = deferred();
+  class ApprovalNotifyingSink extends MemoryDurableSink {
+    async append(draft) {
+      const record = await super.append(draft);
+      if (record.type === DurableRecordTypes.ApprovalRequested) approvalWritten.resolve(record);
+      return record;
+    }
+  }
+  const durable = new ApprovalNotifyingSink();
+  const policy = {
+    async decide(request) {
+      return request.input.path === "b" ? { kind: "ask", reason: "read b" } : { kind: "allow" };
+    },
+  };
+  const tools = new MemoryToolExecutor((request) => completed(request.input.path), readDefinitions);
+  const { engine } = await seededEngine({
+    durable,
+    policy,
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const running = engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 80));
+  const approval = await Promise.race([
+    approvalWritten.promise,
+    new Promise((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `approval not opened: ${durable
+                .records()
+                .map((record) => record.type)
+                .join(", ")}`,
+            ),
+          ),
+        1000,
+      ),
+    ),
+  ]);
+  const priorResult = terminalFor(durable.records(), "a");
+  let approvalOutcome;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    approvalOutcome = await engine.submit(
+      command(
+        CommandTypes.ApprovalResolve,
+        { decision: ApprovalDecisions.Allow },
+        { turnId: ids.turnId, toolCallId: approval.toolCallId, approvalId: approval.approvalId },
+        81 + attempt,
+      ),
+    );
+    if (approvalOutcome.kind === "accepted") break;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(approvalOutcome.kind, "accepted");
+  await running;
+
+  assert.ok(priorResult, "earlier read must terminate before approval.requested");
+  assert.ok(priorResult.sequence < approval.sequence);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
+
+test("an approval can be resolved immediately when its live request is published", async () => {
+  const firstResolution = deferred();
+  class ResolvingLiveSink extends MemoryLiveSink {
+    engine;
+
+    publish(event) {
+      super.publish(event);
+      if (event.type !== "approval.requested") return;
+      const resolve = (n) =>
+        this.engine.submit(
+          command(
+            CommandTypes.ApprovalResolve,
+            { decision: ApprovalDecisions.Allow },
+            { turnId: ids.turnId, toolCallId: event.toolCallId, approvalId: event.approvalId },
+            n,
+          ),
+        );
+      void resolve(90).then((outcome) => {
+        firstResolution.resolve(outcome);
+        // Let the old implementation finish, so the test fails rather than hanging.
+        if (outcome.kind !== "accepted") setImmediate(() => void resolve(91));
+      });
+    }
+  }
+  const live = new ResolvingLiveSink();
+  const { engine, durable } = await seededEngine({
+    live,
+    policy: new StaticPolicy({ kind: "ask", reason: "read" }),
+    tools: new MemoryToolExecutor(() => completed("ok"), readDefinitions),
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+  live.engine = engine;
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 89));
+
+  assert.equal((await firstResolution.promise).kind, "accepted");
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
+
+test("a denied read cannot overtake an earlier queued read result", async () => {
+  const firstStarted = deferred();
+  const releaseFirst = deferred();
+  const policy = {
+    async decide(request) {
+      return request.input.path === "b"
+        ? { kind: "deny", error: { code: "DENIED", message: "denied", retryable: false, fatal: false } }
+        : { kind: "allow" };
+    },
+  };
+  const tools = new MemoryToolExecutor(async (request) => {
+    if (request.input.path === "a") {
+      firstStarted.resolve();
+      await releaseFirst.promise;
+    }
+    return completed(request.input.path);
+  }, readDefinitions);
+  const { engine, durable } = await seededEngine({
+    policy,
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const running = engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 82));
+  await firstStarted.promise;
+  const prematureDenial = terminalFor(durable.records(), "b");
+  releaseFirst.resolve();
+  await running;
+
+  assert.equal(prematureDenial, undefined, "later denial must wait for the earlier read");
+  assert.ok(terminalFor(durable.records(), "a").sequence < terminalFor(durable.records(), "b").sequence);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
+
+test("policy failure terminates earlier requested reads before turn.failed", async () => {
+  const policy = {
+    async decide(request) {
+      if (request.input.path === "b") throw new Error("policy unavailable");
+      return { kind: "allow" };
+    },
+  };
+  const tools = new MemoryToolExecutor(() => completed("ok"), readDefinitions);
+  const { engine, durable } = await seededEngine({
+    policy,
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+    ]),
+  });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 83));
+  const terminal = terminalFor(durable.records(), "a");
+  const turnFailed = durable.records().find((record) => record.type === DurableRecordTypes.TurnFailed);
+  assert.ok(terminal, "earlier requested read must terminate");
+  assert.ok(terminal.sequence < turnFailed.sequence);
+  assert.equal(terminal.type, DurableRecordTypes.ToolResultAborted);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
+
+test("cancellation during policy preparation does not admit a later read", async () => {
+  const enteredPolicy = deferred();
+  const releasePolicy = deferred();
+  const policy = {
+    async decide(request) {
+      if (request.input.path === "b") {
+        enteredPolicy.resolve();
+        return await releasePolicy.promise;
+      }
+      return { kind: "allow" };
+    },
+  };
+  const tools = new MemoryToolExecutor(() => completed("ok"), readDefinitions);
+  const { engine, durable } = await seededEngine({
+    policy,
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+    ]),
+  });
+
+  const running = engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 84));
+  await enteredPolicy.promise;
+  const cancelling = engine.submit(command(CommandTypes.TurnCancel, { reason: "stop" }, { turnId: ids.turnId }, 85));
+  releasePolicy.resolve({ kind: "allow" });
+  await Promise.all([running, cancelling]);
+
+  assert.ok(terminalFor(durable.records(), "a"));
+  assert.equal(terminalFor(durable.records(), "b"), undefined);
+  assert.equal(
+    durable
+      .records()
+      .some((record) => record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === "b"),
+    false,
+  );
+  assert.equal(durable.records().at(-1).type, DurableRecordTypes.TurnAborted);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
 
 test("Step 0: two independent sequential reads do not overlap today", async () => {
   // This test demonstrates the current sequential behavior where read calls
@@ -425,9 +681,10 @@ test("Step 2: two independent reads overlap when dispatched as a wave", async ()
 
   const tools = new MemoryToolExecutor(
     async (request) => {
-      const path = typeof request.input === "object" && request.input !== null && "path" in request.input
-        ? request.input.path
-        : "unknown";
+      const path =
+        typeof request.input === "object" && request.input !== null && "path" in request.input
+          ? request.input.path
+          : "unknown";
       const elapsed = Date.now() - startTime;
 
       executionLog.push({ event: "start", path, elapsed });
@@ -467,8 +724,6 @@ test("Step 2: two independent reads overlap when dispatched as a wave", async ()
 
   // Find the execution intervals
   const aStart = executionLog.find((e) => e.event === "start" && e.path === "a.txt")?.elapsed ?? 0;
-  const aEnd = executionLog.find((e) => e.event === "end" && e.path === "a.txt")?.elapsed ?? 0;
-  const bStart = executionLog.find((e) => e.event === "start" && e.path === "b.txt")?.elapsed ?? 0;
   const bEnd = executionLog.find((e) => e.event === "end" && e.path === "b.txt")?.elapsed ?? 0;
 
   // For wave execution: reads should overlap

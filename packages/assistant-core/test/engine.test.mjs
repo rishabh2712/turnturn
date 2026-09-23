@@ -57,14 +57,17 @@ async function seededEngine({ provider, policy = new StaticPolicy(), tools, scop
     policy,
     tools:
       tools ??
-      new MemoryToolExecutor(() => completed("ok"), [
-        { name: "read", description: "Read a file", parameters: {}, mutating: false },
-        { name: "glob", description: "Glob files", parameters: {}, mutating: false },
-        { name: "grep", description: "Search files", parameters: {}, mutating: false },
-        { name: "shell", description: "Run a shell command", parameters: {}, mutating: true },
-        { name: "write", description: "Write a file", parameters: {}, mutating: true },
-        { name: "edit", description: "Edit a file", parameters: {}, mutating: true },
-      ]),
+      new MemoryToolExecutor(
+        () => completed("ok"),
+        [
+          { name: "read", description: "Read a file", parameters: {}, mutating: false },
+          { name: "glob", description: "Glob files", parameters: {}, mutating: false },
+          { name: "grep", description: "Search files", parameters: {}, mutating: false },
+          { name: "shell", description: "Run a shell command", parameters: {}, mutating: true },
+          { name: "write", description: "Write a file", parameters: {}, mutating: true },
+          { name: "edit", description: "Edit a file", parameters: {}, mutating: true },
+        ],
+      ),
     durable,
     live,
     ids: new SequentialIds(),
