@@ -147,10 +147,11 @@ export function createDeadlineWrapper(
 
       const controller = new AbortController();
       let timeoutFired = false;
+      let parentCancelled = false; // INVARIANT: Track parent abort separately from timeout
 
       // Atomically link parent abort listener
       const onParentAbort = () => {
-        timeoutFired = true;
+        parentCancelled = true; // Parent cancellation, not timeout
         controller.abort();
       };
       linkedSignal.addEventListener("abort", onParentAbort);
@@ -204,6 +205,19 @@ export function createDeadlineWrapper(
         // Race to first settlement: either executor completes or deadline fires (fix #1)
         const outcome = await Promise.race([executorPromise, timeoutPromise]);
 
+        // INVARIANT: Check parent cancellation before timeout to preserve semantics
+        if (parentCancelled) {
+          return {
+            kind: "failed",
+            error: {
+              code: "TURN_CANCELLED",
+              message: "Turn cancelled before tool execution completed",
+              retryable: false,
+              fatal: false,
+            },
+          };
+        }
+
         // If timeout fired, return timeout error regardless of executor result
         if (timeoutFired) {
           return {
@@ -219,6 +233,19 @@ export function createDeadlineWrapper(
 
         return outcome;
       } catch (error) {
+        // INVARIANT: Distinguish cancellation from timeout in error path too
+        if (parentCancelled) {
+          return {
+            kind: "failed",
+            error: {
+              code: "TURN_CANCELLED",
+              message: "Turn cancelled before tool execution completed",
+              retryable: false,
+              fatal: false,
+            },
+          };
+        }
+
         // If we aborted due to timeout (not parent signal), return TOOL_TIMEOUT
         if (timeoutFired || (controller.signal.aborted && !linkedSignal.aborted)) {
           return {

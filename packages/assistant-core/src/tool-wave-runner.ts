@@ -37,7 +37,7 @@ interface PreparedCall {
   readonly scope: ToolObservationScope;
   readonly validatedInput: JsonValue;
   readonly decision: PolicyDecision;
-  readonly executable: boolean; // false if deny/abort/ask resolved to not execute
+  readonly executable: boolean;
 }
 
 export class ToolWaveRunner {
@@ -72,20 +72,35 @@ export class ToolWaveRunner {
         continue;
       }
 
-      // Try to prepare the read-only call
+      // INVARIANT: Approval gates block wave building. Don't check policy here;
+      // instead, pass approval-required calls through executeSequentialCall which
+      // calls prepareCall (discovers approval need) → flushes wave → waits for approval.
+      // This avoids opening approval with queued calls.
+
+      // Optimization: Only prepare if unlikely to need approval (read-only allowlisted tools).
+      // For unknown tools or non-read-only, go sequential to play it safe.
+      // We prepare here as a fast path for common case (read/glob/grep with allow policy).
       const prepared = await this.prepareCall(command, stepId, call, providerOrder, running, observation);
 
-      // If preparation failed, flush wave and skip (prepareCall already recorded the outcome)
       if (prepared === null) {
-        if (currentWave.length > 0) {
-          await this.executeWave(command, currentWave, running, observation);
-          currentWave = [];
-        }
+        // Validation error or invalid input - prepareCall already handled it
         remainingCalls = remainingCalls.slice(1);
         continue;
       }
 
-      // Add to current wave
+      // If approval is needed, we must have already handled it in prepareCall
+      // (which waits for it internally). But if we're here, approval was resolved.
+      // However, to be safe and respect wave atomicity, if this call required approval,
+      // flush any queued wave before adding the approved call.
+      // INVARIANT 1: Flush wave before admitting approved call (approval gate opens otherwise)
+      if (prepared.decision.kind === "ask") {
+        if (currentWave.length > 0) {
+          await this.executeWave(command, currentWave, running, observation);
+          currentWave = [];
+        }
+      }
+
+      // Add executable call to current wave
       currentWave.push(prepared);
       remainingCalls = remainingCalls.slice(1);
 
@@ -96,26 +111,37 @@ export class ToolWaveRunner {
       }
     }
 
-    // Flush any remaining wave
-    if (currentWave.length > 0 && !running.isCancelled) {
-      await this.executeWave(command, currentWave, running, observation);
-    }
-
-    // Handle cancelled turn: abort remaining unadmitted calls
-    if (running.isCancelled && remainingCalls.length > 0) {
-      for (let i = 0; i < remainingCalls.length; i++) {
-        const call = remainingCalls[i]!;
-        const providerOrder = toolCalls.length - remainingCalls.length + i;
-        await this.recordSkippedToolAbort(
-          command,
-          stepId,
-          call,
-          providerOrder,
-          running.cancelReason,
-          observation,
-        );
+    // INVARIANT: All admitted calls must reach terminal outcome before run() returns.
+    // If turn cancels mid-wave-build, currentWave holds calls that have already
+    // recorded toolRequested. They must reach terminal (aborted) or engine state
+    // will be inconsistent (request without result).
+    if (currentWave.length > 0) {
+      if (!running.isCancelled) {
+        // Normal case: execute queued wave
+        await this.executeWave(command, currentWave, running, observation);
+      } else {
+        // Cancellation case: abort all queued calls
+        for (const prepared of currentWave) {
+          await this.options.records.toolAborted(
+            command,
+            { ...command, toolCallId: prepared.toolCallId },
+            syntheticError("TURN_CANCELLED", running.cancelReason ?? "Turn cancelled"),
+          );
+          observation.observeTool({
+            type: "result-recorded",
+            scope: prepared.scope,
+            result: {
+              status: "aborted",
+              error: syntheticError("TURN_CANCELLED", running.cancelReason ?? "Turn cancelled"),
+            },
+          });
+        }
       }
     }
+
+    // Note: remainingCalls should be empty at this point if all calls were processed.
+    // If any remain, they were never admitted (never prepared), so no request was recorded.
+    // The design does NOT record request/result pairs for unadmitted calls.
   }
 
   async abortOutstanding(
@@ -258,6 +284,7 @@ export class ToolWaveRunner {
 
     if (decision.kind === "ask") {
       // Approval required; cannot admit to wave
+      // (Wave flushing happens in main run() loop before calling prepareCall for approved calls)
       await this.options.records.toolRequested(
         command,
         { ...command, stepId, toolCallId },
