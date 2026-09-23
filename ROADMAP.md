@@ -152,16 +152,18 @@ Exit criteria:
 
 Deferred to v1.x by this milestone, named so they stop competing: queued turns, per-tool cancel, in-app workspace switching, multi-workspace, conversation search, attachments, transcript virtualization, and Electron packaging. Electron is a constraint on this milestone's seams, not a deliverable.
 
-## Priority reset: product before breadth (2026-09-22)
+## Priority reset: parallel tools before context and memory (2026-09-22)
 
-The historical M3.5 change closed with acceptance waived; its unfinished work is not silently complete. The next work is ordered by what a person needs to trust and understand one coding turn, then by the foundations needed to extend it:
+The historical M3.5 and M3.6 changes closed by user-directed scope cuts; their unfinished work is not silently complete. Rishabh chose parallel tools as the next active change, then context economy, then cross-session memory. The existing safety and edit-trust risks remain explicit:
 
-1. **M3.6 — Product-grade coding turn.** Make one live, tool-using conversation understandable and controllable in the browser: streaming, tool work, approvals, Stop, reconnect, and an intentional chat UI. Give the frontend clear controller, presentation, and component ownership. OpenSpec: `implement-product-grade-coding-turn` (design approved 2026-09-22; implementation underway). Retry semantics and pre-apply edit guarantees require separate design; neither is implied by this UI slice.
-2. **M4 + M6 — Safety and edit trust.** Persistent policy, confinement, sandbox spike, recoverable edit failures, and a *pre-apply* diff/approval flow. These require their own design and, where contracts change, the full challenge/synthesis gate. A post-execution edit display is not a substitute.
-3. **M5 — Context economy.** Budget accounting, truncation, and compaction before a context-limit failure. Cross-session memory comes later, once its provenance and retention rules are designed.
-4. **Evaluation.** Run and retain a small, repeatable real-repository task set with outcome, turn count, cost, and failure classification. The v1 benchmark below remains report-only.
-5. **M7 + M8 — Durability close-out and operability.** Reconcile M7's remaining recall/writer-safety work against the session storage already delivered, then finish install, config, provider/auth, and cost surfaces.
-6. **v1.x breadth.** Parallel tool waves, cross-session memory, MCP, subagents, and background execution remain explicitly deferred. Each needs an independent contract and failure-mode design; none should be smuggled into the UI change.
+Cross-cutting Codex harness evidence and discussion questions live in `openspec/changes/explore-codex-harness/`; that exploration does not change the priority order below.
+
+1. **M3.6 — Product-grade coding turn: closed by scope cut on 2026-09-22.** The selected-conversation controller, Stop, and shared approval surfaces landed. Presentation, visual/accessibility work, browser-token/CSP repair, and the recorded close-out remain unchecked in `archive/2026-09-22-implement-product-grade-coding-turn`. No unverified spec delta was promoted.
+2. **Parallel read-only tool waves — next.** OpenSpec: `implement-parallel-tool-waves`. Preserve provider order in durable/model-visible results, keep mutating and unknown tools sequential, and make cancellation/approval behavior explicit. This does not expand shell permissions or claim a sandbox.
+3. **M5 — Context economy.** Budget accounting, truncation, and compaction before a context-limit failure.
+4. **Cross-session memory.** Design provenance, retention, and user control separately from context compaction; it follows context economy.
+5. **M4 + M6 — Safety and edit trust.** Persistent policy, confinement, sandbox spike, recoverable edit failures, and a *pre-apply* diff/approval flow remain required for v1. Their risks are accepted while parallel read-only work is prioritized; do not parallelize shell/write/edit to mask them.
+6. **Evaluation, M7 + M8 close-out, and other v1.x breadth.** Keep the existing milestone exit criteria below; MCP, subagents, and background execution remain separately deferred.
 
 This order is a priority overlay, not a claim that earlier milestone exit criteria passed. The user waived the old M3.5 acceptance review, not future correctness tests or the design gate.
 
@@ -271,7 +273,7 @@ Each spike is a task in the change for the milestone it feeds.
 
 Named, not implicit. Each is independently addable after v1, and none is required for the v1 acceptance scenario. The cut came from inventorying 63 capabilities across codex, gemini-cli, and claude-code: 25 landed in v1, 24 here, 13 below.
 
-- **Parallel tool waves.** Parallel-safe tools overlap; mutating tools serialize by default; results return in original call order; sibling failures do not corrupt successful sibling results. Deferred because the real scheduler requirements are only visible once sequential execution has run against real workloads.
+- **Further parallelism.** The active `implement-parallel-tool-waves` change handles bounded read-only waves. Parallel writes, shell commands, cross-turn scheduling, and user-controlled dependency hints remain deferred.
 - **Tools.** `ls`, read-many-files, background shell, ask-user, todo/plan tracking, plan mode, web fetch and search, view image.
 - **MCP client.**
 - **Subagents and skills.**

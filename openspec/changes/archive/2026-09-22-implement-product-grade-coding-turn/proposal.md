@@ -1,6 +1,6 @@
 # Proposal: Product-Grade Coding Turn
 
-Companion to the M3.6 priority in `ROADMAP.md`. The roadmap owns ordering; this change owns the reason for the next slice. Design approved 2026-09-22; implementation is underway in reviewable slices.
+Historical companion to M3.6 in `ROADMAP.md`. Design approved 2026-09-22; closed by user-directed scope cut the same day. See `tasks.md` Closure for the unfinished work.
 
 ## Why
 

@@ -1,6 +1,12 @@
 # Tasks: Product-Grade Coding Turn
 
-Status: **design approved 2026-09-22; implementation underway**. Follow `ROADMAP.md` M3.6 priority and `design.md` D1–D6. The historical M3.5 unchecked tasks remain in the archive; this is not a retroactive claim that they passed.
+Status: **closed by scope cut 2026-09-22; not accepted as complete**. Follow `ROADMAP.md` for current priority. The historical M3.5 unchecked tasks remain in the archive; this is not a retroactive claim that they passed.
+
+## Closure — 2026-09-22
+
+**Closed by Rishabh's direction to move to parallel tools, not accepted as complete.** Keep every unchecked item below unchecked. The implemented controller, Stop command, shared approval state, and pending-action surface remain in the code; section 2's turn presentation, section 3's visual/accessibility work, and section 4's recorded dogfood and spec reconciliation did not pass this change's close-out. The browser-token/CSP repair remains explicitly deferred. Do not promote this change's entire spec delta into `openspec/specs/` or cite this closure as proof of its unverified scenarios.
+
+The next active change is `implement-parallel-tool-waves`. Any later UI continuation should reopen the unchecked work as a separately reviewed slice, not silently check these boxes.
 
 ## Working conventions
 

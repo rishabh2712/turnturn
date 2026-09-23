@@ -1,6 +1,6 @@
 # Design: Product-Grade Coding Turn
 
-Status: **approved by Rishabh on 2026-09-22**. Scope and priority live in `ROADMAP.md`; task order lives in `tasks.md`. Approval of this design does not skip the review of each implementation slice.
+Status: **approved by Rishabh on 2026-09-22; archived after a user-directed scope cut**. Scope and priority live in `ROADMAP.md`; unfinished work is recorded in `tasks.md`. Approval of this design did not complete every implementation slice.
 
 ## The question this design answers
 
@@ -12,9 +12,9 @@ This is not a proposal to rebuild the engine or adopt a new chat SDK. It is a pr
 
 Suppose you send “find the failing test and fix it.” The actual path is:
 
-1. [`App.tsx`](../../../apps/web/src/App.tsx) creates or selects a conversation, then `sendTurn` in `apps/web/src/client-actions.ts` activates its session, shows an optimistic user message, and sends `turn.submit`.
-2. The server writes records to the session log and emits live events. [`resume.ts`](../../../packages/chat-client/src/resume.ts) subscribes, catches up missing records by sequence, and forwards live events to [`ConversationStore`](../../../packages/chat-client/src/store.ts).
-3. The store projects those facts into conversation state. [`turn-projector.ts`](../../../packages/chat-client/src/turn-projector.ts) groups user text, assistant steps, tools, approvals, and outcome into a turn suitable for display.
+1. [`App.tsx`](../../../../apps/web/src/App.tsx) creates or selects a conversation, then `sendTurn` in `apps/web/src/client-actions.ts` activates its session, shows an optimistic user message, and sends `turn.submit`.
+2. The server writes records to the session log and emits live events. [`resume.ts`](../../../../packages/chat-client/src/resume.ts) subscribes, catches up missing records by sequence, and forwards live events to [`ConversationStore`](../../../../packages/chat-client/src/store.ts).
+3. The store projects those facts into conversation state. [`turn-projector.ts`](../../../../packages/chat-client/src/turn-projector.ts) groups user text, assistant steps, tools, approvals, and outcome into a turn suitable for display.
 4. `ConversationPane` in `App.tsx` renders the timeline with `TurnBlock`. `TurnBlock` renders the assistant's message and `ToolActionCard` details. When a tool needs a decision, it renders `ApprovalCard` inside that historical step.
 5. After reload, the browser reopens the conversation, fetches its records, and can rebuild a pending approval. The existing `approval-reload.test.tsx` proves this for one pending edit approval and exact Deny scope. `app-dogfood.test.tsx` proves a prompt can produce visible streamed text. These are **working foundations**, not bugs to reimplement.
 
