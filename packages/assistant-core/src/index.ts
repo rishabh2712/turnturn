@@ -1,4 +1,9 @@
 export * from "./approval-registry.js";
+/**
+ * @internal Deadline wrapper for read-only tool execution.
+ * Only exported for server package use; not part of public API.
+ */
+export { createDeadlineWrapper, type ReadOnlyToolTimeoutConfig } from "./deadline-wrapper.js";
 export * from "./engine.js";
 export * from "./ports.js";
 export * from "./provider-step-runner.js";

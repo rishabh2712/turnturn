@@ -1,5 +1,11 @@
 import { resolve } from "node:path";
-import { createAssistantEngine, createWorkspaceToolExecutor, MemoryDurableSink } from "@turnturn/assistant-core";
+import {
+  createAssistantEngine,
+  createDeadlineWrapper,
+  createWorkspaceToolExecutor,
+  MemoryDurableSink,
+  type ReadOnlyToolTimeoutConfig,
+} from "@turnturn/assistant-core";
 import type {
   AssistantEngine,
   DurableSink,
@@ -20,6 +26,7 @@ import {
 import { DEFAULT_RAW_RESPONSE_MAX_BYTES } from "./observability/index.js";
 import { LocalToolPolicy } from "./policy.js";
 
+export type { ReadOnlyToolTimeoutConfig } from "@turnturn/assistant-core";
 export type { DiscoveryConnectionConfig, ModelProfileConfig, ProviderKind } from "./model-catalog.js";
 
 export interface AssistantServerConfig {
@@ -34,6 +41,7 @@ export interface AssistantServerConfig {
   readonly discoveryConnections?: readonly DiscoveryConnectionConfig[];
   readonly trace?: boolean;
   readonly traceRawResponseMaxBytes?: number;
+  readonly readOnlyToolTimeouts?: ReadOnlyToolTimeoutConfig | undefined;
 }
 
 export interface AssistantRuntime {
@@ -60,10 +68,12 @@ export function createAssistantRuntime(config: AssistantServerConfig): Assistant
     ids,
     currentSequence: () => lastSequence(durable.records()),
   });
-  const tools = createWorkspaceToolExecutor({
+  const baseTools = createWorkspaceToolExecutor({
     roots: [workspace],
     defaultRoot: workspace,
   });
+  // Wrap the tool executor with deadline enforcement for read-only tools
+  const tools = createDeadlineWrapper(baseTools, config.readOnlyToolTimeouts);
   const policy = new LocalToolPolicy();
   const defaultProfileId = config.defaultModelProfileId ?? "default";
   const models = new ModelCatalog(
