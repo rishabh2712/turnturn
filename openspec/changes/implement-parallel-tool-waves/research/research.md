@@ -1,0 +1,9 @@
+# Research: Parallel Tool Waves
+
+Local snapshots inspected on 2026-09-22:
+
+- Codex `../codex` at `73a1148c9c`: `codex-rs/core/src/tools/parallel.rs` uses a read/write gate around dispatch. Calls whose router metadata permits parallelism acquire a shared guard; others acquire an exclusive guard. `codex-rs/core/tests/suite/tool_parallelism.rs` uses overlapping test calls to prove concurrency, rather than relying only on elapsed-time assertions. Borrow the metadata-based admission and overlap tests, not its Rust runtime or its assumption that all supported tools have equivalent safety.
+- Gemini CLI `../gemini-cli` at `ed2ac40df`: `packages/core/src/scheduler/scheduler.ts` batches contiguous parallelizable calls and processes validation/confirmation before execution; `scheduler_parallel.test.ts` verifies `[READ, READ, WRITE, READ, READ]` as three waves. Borrow the contiguous-wave boundary and explicit barrier tests. Do not borrow its default-to-parallel behavior or request-level override: turnturn's unknown and mutating calls must remain sequential.
+- Turnturn `packages/assistant-core/src/tool-wave-runner.ts` currently runs `policy → tool.requested → approval/execution → terminal result` for one call before the next. `workspace/tool-definitions.ts` already exposes `mutating`. The protocol reducers accept interleaved requests/results if each result references a prior request, but the old sequential-loop design B2 assumes one call is fully resolved before the next begins. This change must revise B2 explicitly in its design, without changing protocol types or fabricating sequence values.
+
+The read-only gate is a scheduling classification, not a filesystem sandbox or proof that a custom tool has no hidden side effects. For this first slice, only known `read`, `glob`, and `grep` definitions qualify. A later extension can define a stronger capability contract for third-party tools.
