@@ -314,18 +314,20 @@ export class ToolWaveRunner {
       // Approval granted; proceed to execution
     }
 
-    // Record request and prepare for execution
-    await this.options.records.toolRequested(
-      command,
-      { ...command, stepId, toolCallId },
-      {
-        name: call.name,
-        input: validatedInput,
-        providerOrder,
-        requiresApproval: decision.kind === "ask",
-        providerToolCallId: call.callId,
-      },
-    );
+    // Record request and prepare for execution (if not already recorded during ask gate)
+    if (decision.kind !== "ask") {
+      await this.options.records.toolRequested(
+        command,
+        { ...command, stepId, toolCallId },
+        {
+          name: call.name,
+          input: validatedInput,
+          providerOrder,
+          requiresApproval: false,
+          providerToolCallId: call.callId,
+        },
+      );
+    }
 
     return {
       providerOrder,
