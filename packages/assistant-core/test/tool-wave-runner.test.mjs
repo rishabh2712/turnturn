@@ -413,6 +413,79 @@ test("Step 1: deadline wrapper validates configuration bounds", async () => {
   );
 });
 
+// Step 2: Execute Read-Only Waves
+
+test("Step 2: two independent reads overlap when dispatched as a wave", async () => {
+  // This test demonstrates the DESIRED behavior after wave implementation.
+  // Currently it shows reads execute sequentially.
+  // After Step 2, independent reads should execute concurrently.
+
+  const executionLog = [];
+  const startTime = Date.now();
+
+  const tools = new MemoryToolExecutor(
+    async (request) => {
+      const path = typeof request.input === "object" && request.input !== null && "path" in request.input
+        ? request.input.path
+        : "unknown";
+      const elapsed = Date.now() - startTime;
+
+      executionLog.push({ event: "start", path, elapsed });
+
+      // Simulate realistic I/O delay for each read
+      await new Promise((r) => setTimeout(r, 50));
+
+      executionLog.push({ event: "end", path, elapsed: Date.now() - startTime });
+      return completed(`read ${path}`);
+    },
+    [
+      { name: "read", description: "Read a file", parameters: {}, mutating: false },
+      { name: "glob", description: "Glob files", parameters: {}, mutating: false },
+      { name: "grep", description: "Search files", parameters: {}, mutating: false },
+    ],
+  );
+
+  const { engine, durable } = await seededEngine({
+    tools,
+    provider: new ScriptedProvider([
+      [
+        { type: "tool-call-complete", call: { callId: "read1", name: "read", input: { path: "a.txt" } } },
+        { type: "tool-call-complete", call: { callId: "read2", name: "read", input: { path: "b.txt" } } },
+        { type: "completed", reason: "tool-use" },
+      ],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const outcome = await engine.submit(
+    command(CommandTypes.TurnSubmit, { input: "test wave execution" }, { turnId: ids.turnId }, 70),
+  );
+
+  assert.equal(outcome.kind, "accepted");
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+
+  // Find the execution intervals
+  const aStart = executionLog.find((e) => e.event === "start" && e.path === "a.txt")?.elapsed ?? 0;
+  const aEnd = executionLog.find((e) => e.event === "end" && e.path === "a.txt")?.elapsed ?? 0;
+  const bStart = executionLog.find((e) => e.event === "start" && e.path === "b.txt")?.elapsed ?? 0;
+  const bEnd = executionLog.find((e) => e.event === "end" && e.path === "b.txt")?.elapsed ?? 0;
+
+  // For wave execution: reads should overlap
+  // a.txt: [start: ~0, end: ~50]
+  // b.txt: [start: ~0-5, end: ~50-55] (starts before a finishes)
+  // Total time should be ~50-55ms, not ~100ms
+
+  const totalTime = bEnd - aStart;
+
+  // This test is EXPECTED TO FAIL now (sequential = ~100ms)
+  // After Step 2, it should PASS (parallel = ~50-55ms)
+  assert.ok(
+    totalTime < 75,
+    `reads should overlap in wave execution (~50-55ms), not sequential (~100ms). Actual: ${totalTime}ms`,
+  );
+});
+
 test("Step 1: deadline wrapper settles on deadline even if executor ignores abort", async () => {
   const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
 
