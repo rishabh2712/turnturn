@@ -292,7 +292,7 @@ summary:focus-visible {
   max-width: 100%;
   font-size: 14px;
   line-height: 1.65;
-  white-space: pre-wrap;
+  /* white-space: pre-wrap; */
   overflow-wrap: anywhere;
 }
 .tt-message-label {
