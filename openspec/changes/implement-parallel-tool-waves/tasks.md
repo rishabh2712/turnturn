@@ -1,6 +1,6 @@
 # Tasks: Parallel Tool Waves
 
-Status: **design draft; implementation blocked on Rishabh's review of `design.md` D1–D6, the contract challenge/synthesis, and the spec scenarios.** Rishabh agreed to account for admission/barriers, independent failures, bounded read-only deadlines, turn cancellation, and deterministic durable results; that agreement does not close the full design gate. Execute one reviewable slice at a time under `.agents/skills` / the review-before-code convention. Do not commit unless Rishabh asks.
+Status: **design approved by Rishabh on 2026-09-23; ready for implementation.** Execute one reviewable slice at a time under `.agents/skills` / the review-before-code convention. Do not commit unless Rishabh asks.
 
 ## Working conventions
 
@@ -12,15 +12,15 @@ Status: **design draft; implementation blocked on Rishabh's review of `design.md
 
 ## Implementer handoff
 
-This section is the handoff; keep implementation guidance here rather than creating a separate document. The full design gate above is still open. Before changing production code, review D1–D6, the spec scenarios, and `research/neutral-challenge.md` / `research/synthesis.md` with Rishabh and obtain approval. Do not interpret approval of the five safety goals as approval of every scheduling and public-API detail.
+This section is the handoff; keep implementation guidance here rather than creating a separate document. The full design gate below is approved. Before changing production code, read D1–D6, the spec scenarios, and `research/neutral-challenge.md` / `research/synthesis.md`. If implementation reveals a need to change the approved contract, stop and bring that change back for review.
 
 Start in `packages/assistant-core/src/tool-wave-runner.ts` and its tests; inspect `ports.ts`, `turn-runner.ts`, the record emitter, both reducers, and session repair before touching the scheduler. For deadlines, inspect `packages/assistant-server/src/runtime.ts` and `persistent-runtime.ts`, then the `read`/`glob`/`grep` implementations. Preserve unrelated working-tree changes. Do not commit unless Rishabh asks.
 
-Run `node scripts/check-milestone-gate.mjs implement-parallel-tool-waves` after the design gate is approved. Verify each completed step with `pnpm --filter @turnturn/assistant-core lint`, `build`, `typecheck`, and `test`; at closeout run the assistant-server equivalents and root `pnpm build`, `pnpm typecheck`, and `pnpm test`. Report results per step, tests proving each failure/cancellation/order case, any design deviation, and anything not verified. Never mark a step complete with a failing suite or nonempty reducer issues.
+Run `node scripts/check-milestone-gate.mjs implement-parallel-tool-waves` before implementation. Verify each completed step with `pnpm --filter @turnturn/assistant-core lint`, `build`, `typecheck`, and `test`; at closeout run the assistant-server equivalents and root `pnpm build`, `pnpm typecheck`, and `pnpm test`. Report results per step, tests proving each failure/cancellation/order case, any design deviation, and anything not verified. Never mark a step complete with a failing suite or nonempty reducer issues.
 
 ## Design Gate
 
-- [ ] Rishabh reviews and approves D1–D6 and `research/neutral-challenge.md` / `research/synthesis.md`, especially the B2 cancellation revision, built-in allowlist, four-call bound, per-call deadline scope/configuration, sibling-failure isolation, and deterministic terminal ordering.
+- [x] Rishabh reviewed and approved D1–D6 and `research/neutral-challenge.md` / `research/synthesis.md` on 2026-09-23, including the B2 cancellation revision, built-in allowlist, four-call bound, per-call deadline scope/configuration, sibling-failure isolation, and deterministic terminal ordering.
 
 ## Implementation Tasks
 

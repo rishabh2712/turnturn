@@ -1,6 +1,6 @@
 # Design: Parallel Tool Waves
 
-Status: **draft for Rishabh's review; do not implement until approved.** `ROADMAP.md` owns priority; this document owns the scheduling decisions. The user interview accepted the five safety goals, not the whole design gate. Reference research, the neutral challenge, and synthesis are in `research/` because the optional server timeout configuration changes a public package API.
+Status: **design approved by Rishabh on 2026-09-23; ready for implementation.** `ROADMAP.md` owns priority; this document owns the scheduling decisions. The user interview, reference research, neutral challenge, and synthesis are in `research/` because the optional server timeout configuration changes a public package API.
 
 ## Problem and current flow
 
