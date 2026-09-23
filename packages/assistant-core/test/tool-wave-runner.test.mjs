@@ -270,6 +270,36 @@ test("policy failure terminates earlier requested reads before turn.failed", asy
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
 });
 
+test("validation exception terminates earlier requests without disguising it as a tool failure", async () => {
+  const tools = new MemoryToolExecutor(() => completed("ok"), readDefinitions);
+  tools.validate = ({ input }) => {
+    if (input.path === "b") throw new Error("validator unavailable");
+    return { ok: true, input };
+  };
+  const { engine, durable } = await seededEngine({
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+    ]),
+  });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 102));
+  const records = durable.records();
+  const aResult = terminalFor(records, "a");
+  const turnFailed = records.find((record) => record.type === DurableRecordTypes.TurnFailed);
+  assert.equal(aResult?.type, DurableRecordTypes.ToolResultAborted);
+  assert.ok(aResult.sequence < turnFailed.sequence);
+  assert.equal(terminalFor(records, "b"), undefined);
+  assert.equal(
+    records.some(
+      (record) => record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === "b",
+    ),
+    false,
+  );
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
 test("cancellation during policy preparation does not admit a later read", async () => {
   const enteredPolicy = deferred();
   const releasePolicy = deferred();
@@ -442,7 +472,7 @@ test("Step 0: wave planner stops before barriers", async () => {
 test("Step 0: wave planner handles unknown tools as barriers", async () => {
   const port = (await import("../dist/workspace-tools.js")).createWorkspaceToolExecutor({ roots: ["/tmp"] });
 
-  const { planNextWave } = await import("../dist/wave-planner.js");
+  const { classifyToolCall, planNextWave } = await import("../dist/wave-planner.js");
 
   const calls = [
     { callId: "1", name: "read", input: { path: "a.txt" } },
@@ -453,6 +483,7 @@ test("Step 0: wave planner handles unknown tools as barriers", async () => {
   const plan = planNextWave(calls, port);
   assert.equal(plan.wave.length, 1, "wave should stop before unknown tool");
   assert.deepEqual(plan.remaining, [calls[1], calls[2]], "remaining should have unknown and later read");
+  assert.equal(classifyToolCall(calls[0], []).isBarrier, true, "a read without its definition is also a barrier");
 });
 
 // Step 1: Deadline Wrapper Tests
@@ -599,6 +630,136 @@ test("Step 1: deadline wrapper suppresses callbacks after timeout", async () => 
 
   assert.equal(outcome.kind, "failed", "should timeout");
   assert.equal(callbackLog.length, 0, "should not emit callbacks after timeout");
+});
+
+test("Step 1: deadline wrapper suppresses callbacks after normal settlement", async () => {
+  const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
+  const output = [];
+  let lateOutput;
+  const tool = {
+    definitions: () => readDefinitions,
+    validate: ({ input }) => ({ ok: true, input }),
+    async execute(request) {
+      lateOutput = () => request.callbacks.stdout("late");
+      return completed("done");
+    },
+  };
+  const wrapper = createDeadlineWrapper(tool, { defaultMs: 100, maxMs: 200 });
+  const outcome = await wrapper.execute({
+    conversationId: ids.conversationId,
+    sessionId: ids.sessionId,
+    turnId: ids.turnId,
+    toolCallId: "tool_test",
+    name: "read",
+    input: { path: "a" },
+    signal: new AbortController().signal,
+    callbacks: { stdout: (text) => output.push(text), stderr: () => {}, progress: () => {} },
+  });
+
+  assert.equal(outcome.kind, "completed");
+  lateOutput();
+  assert.deepEqual(output, []);
+});
+
+test("Step 1: a timed-out read ignores late physical output and settlement", async () => {
+  const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
+  const physical = deferred();
+  const output = [];
+  let lateOutput;
+  const tool = {
+    definitions: () => readDefinitions,
+    validate: ({ input }) => ({ ok: true, input }),
+    execute: (request) => {
+      lateOutput = () => request.callbacks.stdout("late");
+      return physical.promise;
+    },
+  };
+  const wrapper = createDeadlineWrapper(tool, { defaultMs: 20, maxMs: 100 });
+  const outcome = await wrapper.execute({
+    conversationId: ids.conversationId,
+    sessionId: ids.sessionId,
+    turnId: ids.turnId,
+    toolCallId: "tool_test",
+    name: "read",
+    input: { path: "a" },
+    signal: new AbortController().signal,
+    callbacks: { stdout: (text) => output.push(text), stderr: () => {}, progress: () => {} },
+  });
+
+  assert.equal(outcome.kind, "failed");
+  assert.equal(outcome.error.code, "TOOL_TIMEOUT");
+  lateOutput();
+  physical.resolve(completed("too late"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(output, []);
+  assert.equal(outcome.error.code, "TOOL_TIMEOUT");
+});
+
+test("Step 1: timeout remains the outcome if aborting the tool triggers turn cancellation", async () => {
+  const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
+  const parent = new AbortController();
+  const tool = {
+    definitions: () => readDefinitions,
+    validate: ({ input }) => ({ ok: true, input }),
+    execute: (request) => {
+      request.signal.addEventListener("abort", () => parent.abort());
+      return new Promise(() => {});
+    },
+  };
+  const wrapper = createDeadlineWrapper(tool, { defaultMs: 20, maxMs: 100 });
+  const outcome = await wrapper.execute({
+    conversationId: ids.conversationId,
+    sessionId: ids.sessionId,
+    turnId: ids.turnId,
+    toolCallId: "tool_test",
+    name: "read",
+    input: { path: "a" },
+    signal: parent.signal,
+    callbacks: { stdout: () => {}, stderr: () => {}, progress: () => {} },
+  });
+  assert.equal(parent.signal.aborted, true);
+  assert.equal(outcome.kind, "failed");
+  assert.equal(outcome.error.code, "TOOL_TIMEOUT");
+});
+
+test("Step 1: turn cancellation settles an executor that ignores abort", async () => {
+  const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
+  const entered = deferred();
+  const output = [];
+  let lateOutput;
+  const tool = {
+    definitions: () => readDefinitions,
+    validate: ({ input }) => ({ ok: true, input }),
+    execute: (request) => {
+      lateOutput = () => request.callbacks.stdout("late");
+      entered.resolve();
+      return new Promise(() => {});
+    },
+  };
+  const wrapper = createDeadlineWrapper(tool, { defaultMs: 100, maxMs: 200 });
+  const controller = new AbortController();
+  const running = wrapper.execute({
+    conversationId: ids.conversationId,
+    sessionId: ids.sessionId,
+    turnId: ids.turnId,
+    toolCallId: "tool_test",
+    name: "read",
+    input: { path: "a" },
+    signal: controller.signal,
+    callbacks: { stdout: (text) => output.push(text), stderr: () => {}, progress: () => {} },
+  });
+  await entered.promise;
+  controller.abort();
+  const winner = await Promise.race([
+    running.then(() => "cancelled"),
+    new Promise((resolve) => setImmediate(() => resolve("still waiting"))),
+  ]);
+  assert.equal(winner, "cancelled", "turn cancellation should not wait for the read deadline");
+  const outcome = await running;
+  assert.equal(outcome.kind, "failed");
+  assert.equal(outcome.error.code, "TURN_CANCELLED");
+  lateOutput();
+  assert.deepEqual(output, []);
 });
 
 test("Step 1: deadline wrapper passes turn cancellation through", async () => {
@@ -781,4 +942,448 @@ test("Step 1: deadline wrapper settles on deadline even if executor ignores abor
 
   // Verify wrapper settled quickly, not at 200ms
   assert.ok(elapsed < 150, `wrapper should settle ~50ms, not wait for executor's 200ms (actual: ${elapsed}ms)`);
+});
+
+test("reads overlap but cannot cross an edit barrier", async () => {
+  const aStarted = deferred();
+  const bStarted = deferred();
+  const bFinished = deferred();
+  const editStarted = deferred();
+  const dStarted = deferred();
+
+  const releaseA = deferred();
+  const releaseB = deferred();
+  const releaseEdit = deferred();
+
+  const starts = [];
+  const tools = new MemoryToolExecutor(
+    async (request) => {
+      const path = request.input.path;
+      starts.push(path);
+
+      if (path === "a") {
+        aStarted.resolve();
+        await releaseA.promise;
+      } else if (path === "b") {
+        bStarted.resolve();
+        await releaseB.promise;
+        bFinished.resolve();
+      } else if (path === "c") {
+        editStarted.resolve();
+        await releaseEdit.promise;
+      } else if (path === "d") {
+        dStarted.resolve();
+      }
+
+      return completed(path);
+    },
+    [
+      { name: "read", description: "Read", parameters: {}, mutating: false },
+      { name: "edit", description: "Edit", parameters: {}, mutating: true },
+    ],
+  );
+
+  const { engine, durable } = await seededEngine({
+    tools,
+    provider: new ScriptedProvider([
+      [
+        toolCall("a", "a"),
+        toolCall("b", "b"),
+        {
+          type: "tool-call-complete",
+          call: {
+            callId: "c",
+            name: "edit",
+            input: { path: "c" },
+          },
+        },
+        toolCall("d", "d"),
+        { type: "completed", reason: "tool-use" },
+      ],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "work" }, { turnId: ids.turnId }, 92));
+
+  // A and B must both start without either being released.
+  await Promise.all([aStarted.promise, bStarted.promise]);
+  assert.deepEqual(starts, ["a", "b"]);
+
+  // Even after B finishes, C cannot start while A is still running.
+  releaseB.resolve();
+  await bFinished.promise;
+  assert.equal(starts.includes("c"), false);
+
+  releaseA.resolve();
+  await editStarted.promise;
+  assert.equal(starts.includes("d"), false);
+
+  releaseEdit.resolve();
+  await dStarted.promise;
+  await turn;
+
+  const records = durable.records();
+  const aResult = terminalFor(records, "a");
+  const bResult = terminalFor(records, "b");
+  const cResult = terminalFor(records, "c");
+  const dRequest = records.find(
+    (record) => record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === "d",
+  );
+
+  assert.ok(aResult && bResult && cResult && dRequest);
+  assert.ok(aResult.sequence < bResult.sequence); // Provider order, despite B finishing first
+  assert.ok(bResult.sequence < cResult.sequence);
+  assert.ok(cResult.sequence < dRequest.sequence);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("an executor throw fails only that read", { timeout: 2000 }, async () => {
+  const aStarted = deferred();
+  const releaseA = deferred();
+  const bEntered = deferred();
+  const tools = new MemoryToolExecutor(async (request) => {
+    if (request.input.path === "a") {
+      aStarted.resolve();
+      await releaseA.promise;
+      return completed("A succeeded");
+    }
+    bEntered.resolve();
+    throw new Error("B executor crashed");
+  }, readDefinitions);
+  const { engine, durable } = await seededEngine({
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 94));
+  await Promise.all([aStarted.promise, bEntered.promise]);
+  releaseA.resolve();
+  await turn;
+
+  const records = durable.records();
+  const aResult = terminalFor(records, "a");
+  const bResult = terminalFor(records, "b");
+  assert.equal(aResult?.type, DurableRecordTypes.ToolResultCompleted);
+  assert.equal(bResult?.type, DurableRecordTypes.ToolResultFailed);
+  assert.equal(bResult.payload.error.code, "TOOL_EXECUTOR_THROWN");
+  assert.ok(aResult.sequence < bResult.sequence);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("one timed-out read preserves its successful sibling", { timeout: 2000 }, async () => {
+  const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
+  const rawTools = new MemoryToolExecutor(
+    (request) => (request.input.path === "a" ? completed("A succeeded") : new Promise(() => {})),
+    readDefinitions,
+  );
+  const tools = createDeadlineWrapper(rawTools, { defaultMs: 20, maxMs: 100 });
+  const { engine, durable } = await seededEngine({
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 95));
+  const records = durable.records();
+  const aResult = terminalFor(records, "a");
+  const bResult = terminalFor(records, "b");
+  assert.equal(aResult?.type, DurableRecordTypes.ToolResultCompleted);
+  assert.equal(bResult?.type, DurableRecordTypes.ToolResultFailed);
+  assert.equal(bResult.payload.error.code, "TOOL_TIMEOUT");
+  assert.ok(aResult.sequence < bResult.sequence);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("allow-modified input is revalidated before joining a read wave", { timeout: 2000 }, async () => {
+  const validated = [];
+  const executed = [];
+  const tools = new MemoryToolExecutor((request) => {
+    executed.push(request.input.path);
+    return completed(request.input.path);
+  }, readDefinitions);
+  tools.validate = ({ input }) => {
+    validated.push(input.path);
+    return { ok: true, input };
+  };
+  const policy = {
+    async decide(request) {
+      return request.input.path === "b" ? { kind: "allow-modified", input: { path: "b-updated" } } : { kind: "allow" };
+    },
+  };
+  const { engine, durable } = await seededEngine({
+    tools,
+    policy,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  await engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 96));
+  const records = durable.records();
+  const bRequest = records.find(
+    (record) => record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === "b",
+  );
+  assert.deepEqual(validated, ["a", "b", "b-updated"]);
+  assert.deepEqual(executed, ["a", "b-updated"]);
+  assert.deepEqual(bRequest?.payload.input, { path: "b-updated" });
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("a denied read is a barrier before a later read", { timeout: 2000 }, async () => {
+  const aStarted = deferred();
+  const releaseA = deferred();
+  const started = [];
+  const tools = new MemoryToolExecutor(async (request) => {
+    started.push(request.input.path);
+    if (request.input.path === "a") {
+      aStarted.resolve();
+      await releaseA.promise;
+    }
+    return completed(request.input.path);
+  }, readDefinitions);
+  const policy = {
+    async decide(request) {
+      return request.input.path === "b"
+        ? { kind: "deny", error: { code: "POLICY_DENIED", message: "no", retryable: false, fatal: false } }
+        : { kind: "allow" };
+    },
+  };
+  const { engine, durable } = await seededEngine({
+    tools,
+    policy,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), toolCall("c", "c"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 97));
+  await aStarted.promise;
+  assert.deepEqual(started, ["a"]);
+  releaseA.resolve();
+  await turn;
+
+  const records = durable.records();
+  assert.equal(terminalFor(records, "b")?.type, DurableRecordTypes.ToolResultDenied);
+  assert.deepEqual(started, ["a", "c"]);
+  assert.ok(terminalFor(records, "a").sequence < terminalFor(records, "b").sequence);
+  assert.ok(terminalFor(records, "b").sequence < terminalFor(records, "c").sequence);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("policy abort drains the earlier wave and does not admit a later read", { timeout: 2000 }, async () => {
+  const aStarted = deferred();
+  const releaseA = deferred();
+  const tools = new MemoryToolExecutor(async (request) => {
+    if (request.input.path === "a") {
+      aStarted.resolve();
+      await releaseA.promise;
+    }
+    return completed(request.input.path);
+  }, readDefinitions);
+  const policy = {
+    async decide(request) {
+      return request.input.path === "b"
+        ? { kind: "abort", error: { code: "POLICY_ABORT", message: "stop", retryable: false, fatal: false } }
+        : { kind: "allow" };
+    },
+  };
+  const { engine, durable } = await seededEngine({
+    tools,
+    policy,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), toolCall("c", "c"), { type: "completed", reason: "tool-use" }],
+    ]),
+  });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 98));
+  await aStarted.promise;
+  releaseA.resolve();
+  await turn;
+
+  const records = durable.records();
+  assert.equal(terminalFor(records, "a")?.type, DurableRecordTypes.ToolResultCompleted);
+  assert.equal(terminalFor(records, "b")?.type, DurableRecordTypes.ToolResultAborted);
+  assert.equal(
+    records.some(
+      (record) => record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === "c",
+    ),
+    false,
+  );
+  assert.equal(records.at(-1).type, DurableRecordTypes.TurnAborted);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("one failed read does not cancel its sibling", { timeout: 2000 }, async () => {
+  const aStarted = deferred();
+  const releaseA = deferred();
+  const bFinished = deferred();
+
+  const tools = new MemoryToolExecutor(async (request) => {
+    if (request.input.path === "a") {
+      aStarted.resolve();
+      await releaseA.promise;
+      return completed("A succeeded");
+    }
+
+    bFinished.resolve();
+    return {
+      kind: "failed",
+      error: {
+        code: "READ_FAILED",
+        message: "B could not be read",
+        retryable: false,
+        fatal: false,
+      },
+    };
+  }, readDefinitions);
+
+  const { engine, durable } = await seededEngine({
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 93));
+
+  await Promise.all([aStarted.promise, bFinished.promise]);
+  releaseA.resolve();
+  await turn;
+
+  const records = durable.records();
+  const aResult = terminalFor(records, "a");
+  const bResult = terminalFor(records, "b");
+
+  assert.equal(aResult?.type, DurableRecordTypes.ToolResultCompleted);
+  assert.equal(bResult?.type, DurableRecordTypes.ToolResultFailed);
+  assert.ok(aResult.sequence < bResult.sequence);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("an approval-required read separates earlier and later reads", { timeout: 2000 }, async () => {
+  const approvalVisible = deferred();
+  const bStarted = deferred();
+  const releaseB = deferred();
+  const executed = [];
+  class ApprovalLiveSink extends MemoryLiveSink {
+    publish(event) {
+      super.publish(event);
+      if (event.type === "approval.requested") approvalVisible.resolve(event);
+    }
+  }
+  const policy = {
+    async decide(request) {
+      return request.input.path === "b" ? { kind: "ask", reason: "approve B" } : { kind: "allow" };
+    },
+  };
+  const tools = new MemoryToolExecutor(async (request) => {
+    const path = request.input.path;
+    executed.push(path);
+    if (path === "b") {
+      bStarted.resolve();
+      await releaseB.promise;
+    }
+    return completed(path);
+  }, readDefinitions);
+  const { engine, durable } = await seededEngine({
+    live: new ApprovalLiveSink(),
+    policy,
+    tools,
+    provider: new ScriptedProvider([
+      [toolCall("a", "a"), toolCall("b", "b"), toolCall("c", "c"), { type: "completed", reason: "tool-use" }],
+      [{ type: "completed", reason: "complete" }],
+    ]),
+  });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read" }, { turnId: ids.turnId }, 99));
+  const approval = await approvalVisible.promise;
+  assert.deepEqual(executed, ["a"]);
+  const approvalRecord = durable
+    .records()
+    .find(
+      (record) => record.type === DurableRecordTypes.ApprovalRequested && record.approvalId === approval.approvalId,
+    );
+  assert.ok(terminalFor(durable.records(), "a").sequence < approvalRecord.sequence);
+  const resolution = await engine.submit(
+    command(
+      CommandTypes.ApprovalResolve,
+      { decision: ApprovalDecisions.Allow },
+      { turnId: ids.turnId, toolCallId: approval.toolCallId, approvalId: approval.approvalId },
+      100,
+    ),
+  );
+  assert.equal(resolution.kind, "accepted");
+  await bStarted.promise;
+  assert.deepEqual(executed, ["a", "b"]);
+  releaseB.resolve();
+  await turn;
+
+  const records = durable.records();
+  assert.deepEqual(executed, ["a", "b", "c"]);
+  assert.ok(terminalFor(records, "b").sequence < terminalFor(records, "c").sequence);
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
+});
+
+test("the next provider step receives both parallel read results paired by call id", { timeout: 2000 }, async () => {
+  const aStarted = deferred();
+  const bStarted = deferred();
+  const releaseA = deferred();
+  const releaseB = deferred();
+  const tools = new MemoryToolExecutor(async (request) => {
+    if (request.input.path === "a") {
+      aStarted.resolve();
+      await releaseA.promise;
+    } else {
+      bStarted.resolve();
+      await releaseB.promise;
+    }
+    return completed(request.input.path.toUpperCase());
+  }, readDefinitions);
+  const provider = new ScriptedProvider([
+    [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+    [{ type: "completed", reason: "complete" }],
+  ]);
+  const { engine, durable } = await seededEngine({ tools, provider });
+
+  const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 101));
+  await Promise.all([aStarted.promise, bStarted.promise]);
+  releaseB.resolve();
+  releaseA.resolve();
+  await turn;
+
+  const history = provider.requests[1].history;
+  const requests = history.items.filter((item) => item.type === "tool.request");
+  const results = history.items.filter((item) => item.type === "tool.result");
+  assert.deepEqual(
+    requests.map((item) => item.providerToolCallId),
+    ["a", "b"],
+  );
+  assert.deepEqual(
+    results.map((item) => item.toolCallId),
+    requests.map((item) => item.toolCallId),
+  );
+  assert.deepEqual(
+    results.map((item) => item.output),
+    ["A", "B"],
+  );
+  assert.deepEqual(history.issues, []);
+  assert.deepEqual(reduceEngineState(durable.records()).issues, []);
+  assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
 });

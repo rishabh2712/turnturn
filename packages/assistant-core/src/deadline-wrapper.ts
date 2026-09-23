@@ -104,7 +104,7 @@ export function validateTimeoutConfig(config: ReadOnlyToolTimeoutConfig | undefi
  *
  * Key guarantees:
  * - Wrapper result settles within deadline (uses Promise.race)
- * - Callbacks are gated by timeout firing, not executor settling
+ * - Callbacks stop after timeout, turn cancellation, or any logical settlement
  * - Pre-aborted turns are rejected immediately
  * - Turn cancellation is propagated atomically
  */
@@ -147,120 +147,93 @@ export function createDeadlineWrapper(
 
       const controller = new AbortController();
       let timeoutFired = false;
-      let parentCancelled = false; // INVARIANT: Track parent abort separately from timeout
+      let parentCancelled = false;
+      let settled = false;
+      const cancelledOutcome: ToolOutcome = {
+        kind: "failed",
+        error: {
+          code: "TURN_CANCELLED",
+          message: "Turn cancelled before tool execution completed",
+          retryable: false,
+          fatal: false,
+        },
+      };
+      const timeoutOutcome: ToolOutcome = {
+        kind: "failed",
+        error: {
+          code: "TOOL_TIMEOUT",
+          message: `Tool execution exceeded ${effectiveTimeout}ms timeout`,
+          retryable: false,
+          fatal: false,
+        },
+      };
+      type Result = { kind: "outcome"; outcome: ToolOutcome } | { kind: "executor-error"; error: unknown };
+      let resolveCancellation!: (result: Result) => void;
+      const cancellationPromise = new Promise<Result>((resolve) => {
+        resolveCancellation = resolve;
+      });
 
-      // Atomically link parent abort listener
       const onParentAbort = () => {
-        parentCancelled = true; // Parent cancellation, not timeout
+        if (parentCancelled || timeoutFired || settled) return;
+        parentCancelled = true;
+        resolveCancellation({ kind: "outcome", outcome: cancelledOutcome });
         controller.abort();
       };
       linkedSignal.addEventListener("abort", onParentAbort);
+      if (linkedSignal.aborted) onParentAbort();
 
       let timeoutHandle: NodeJS.Timeout | undefined;
 
       try {
-        // Gate callbacks by timeoutFired, not by executor settling (fix #2)
+        if (parentCancelled) return cancelledOutcome;
+
+        // Late physical callbacks cannot escape any logical terminal outcome.
         const wrappedCallbacks: ToolExecutionCallbacks = {
           stdout(text: string) {
-            if (!timeoutFired) {
+            if (!settled && !timeoutFired && !parentCancelled) {
               request.callbacks.stdout(text);
             }
           },
           stderr(text: string) {
-            if (!timeoutFired) {
+            if (!settled && !timeoutFired && !parentCancelled) {
               request.callbacks.stderr(text);
             }
           },
           progress(message: string) {
-            if (!timeoutFired) {
+            if (!settled && !timeoutFired && !parentCancelled) {
               request.callbacks.progress(message);
             }
           },
         };
 
-        // Executor promise with signal and wrapped callbacks
-        const executorPromise = executor.execute({
-          ...request,
-          signal: controller.signal,
-          callbacks: wrappedCallbacks,
-        });
+        // Turn executor throws into a race result too; a losing rejection is still observed.
+        const executorPromise: Promise<Result> = (async () =>
+          executor.execute({
+            ...request,
+            signal: controller.signal,
+            callbacks: wrappedCallbacks,
+          }))().then(
+          (outcome) => ({ kind: "outcome", outcome }),
+          (error: unknown) => ({ kind: "executor-error", error }),
+        );
 
         // Timeout promise that settles immediately on deadline (fix #1)
-        const timeoutPromise = new Promise<ToolOutcome>((resolve) => {
+        const timeoutPromise = new Promise<Result>((resolve) => {
           timeoutHandle = setTimeout(() => {
+            if (parentCancelled || settled) return;
             timeoutFired = true;
+            resolve({ kind: "outcome", outcome: timeoutOutcome });
             controller.abort();
-            resolve({
-              kind: "failed",
-              error: {
-                code: "TOOL_TIMEOUT",
-                message: `Tool execution exceeded ${effectiveTimeout}ms timeout`,
-                retryable: false,
-                fatal: false,
-              },
-            });
           }, effectiveTimeout);
         });
 
-        // Race to first settlement: either executor completes or deadline fires (fix #1)
-        const outcome = await Promise.race([executorPromise, timeoutPromise]);
-
-        // INVARIANT: Check parent cancellation before timeout to preserve semantics
-        if (parentCancelled) {
-          return {
-            kind: "failed",
-            error: {
-              code: "TURN_CANCELLED",
-              message: "Turn cancelled before tool execution completed",
-              retryable: false,
-              fatal: false,
-            },
-          };
-        }
-
-        // If timeout fired, return timeout error regardless of executor result
-        if (timeoutFired) {
-          return {
-            kind: "failed",
-            error: {
-              code: "TOOL_TIMEOUT",
-              message: `Tool execution exceeded ${effectiveTimeout}ms timeout`,
-              retryable: false,
-              fatal: false,
-            },
-          };
-        }
-
-        return outcome;
-      } catch (error) {
-        // INVARIANT: Distinguish cancellation from timeout in error path too
-        if (parentCancelled) {
-          return {
-            kind: "failed",
-            error: {
-              code: "TURN_CANCELLED",
-              message: "Turn cancelled before tool execution completed",
-              retryable: false,
-              fatal: false,
-            },
-          };
-        }
-
-        // If we aborted due to timeout (not parent signal), return TOOL_TIMEOUT
-        if (timeoutFired || (controller.signal.aborted && !linkedSignal.aborted)) {
-          return {
-            kind: "failed",
-            error: {
-              code: "TOOL_TIMEOUT",
-              message: `Tool execution exceeded ${effectiveTimeout}ms timeout`,
-              retryable: false,
-              fatal: false,
-            },
-          };
-        }
-        // Otherwise let the exception propagate (executor implementation error)
-        throw error;
+        // The first executor outcome, deadline, or turn cancellation settles this call.
+        const result = await Promise.race([executorPromise, timeoutPromise, cancellationPromise]);
+        settled = true;
+        if (result.kind === "executor-error") throw result.error;
+        return result.outcome;
       } finally {
+        settled = true;
         // Cleanup
         if (timeoutHandle !== undefined) {
           clearTimeout(timeoutHandle);

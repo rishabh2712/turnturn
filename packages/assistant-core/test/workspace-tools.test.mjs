@@ -75,6 +75,68 @@ test("glob and grep return structured capped results", async () => {
   assert.deepEqual(grep.output.matches, [{ path: "src/a.txt", lineNumber: 1, line: "needle" }]);
 });
 
+test("read, glob, and grep reject an already-cancelled signal", async () => {
+  const { root, tools } = await workspace();
+  await fs.writeFile(path.join(root, "notes.txt"), "needle", "utf8");
+  const controller = new AbortController();
+  controller.abort();
+
+  for (const [name, input] of [
+    ["read", { path: "notes.txt" }],
+    ["glob", { path: ".", pattern: "*.txt" }],
+    ["grep", { path: ".", query: "needle" }],
+  ]) {
+    const outcome = await tools.execute({ ...toolRequest(name, input), signal: controller.signal });
+    assert.equal(outcome.kind, "failed", `${name} should not continue after cancellation`);
+    assert.equal(outcome.error.code, "TURN_CANCELLED");
+  }
+});
+
+test("glob and grep stop during directory traversal when their signal aborts", async () => {
+  const { root, tools } = await workspace();
+  await fs.writeFile(path.join(root, "notes.txt"), "needle", "utf8");
+
+  for (const [name, input] of [
+    ["glob", { path: ".", pattern: "*.txt" }],
+    ["grep", { path: ".", query: "needle" }],
+  ]) {
+    const controller = new AbortController();
+    const originalCheck = controller.signal.throwIfAborted.bind(controller.signal);
+    let checks = 0;
+    controller.signal.throwIfAborted = () => {
+      checks += 1;
+      if (checks === 4) controller.abort(); // After path resolution, while walking entries.
+      originalCheck();
+    };
+
+    const outcome = await tools.execute({ ...toolRequest(name, input), signal: controller.signal });
+    assert.ok(checks >= 4, `${name} should check cancellation during traversal`);
+    assert.equal(outcome.kind, "failed");
+    assert.equal(outcome.error.code, "TURN_CANCELLED");
+  }
+});
+
+test("grep stops during a multi-line scan when its signal aborts", async () => {
+  const { root, tools } = await workspace();
+  await fs.writeFile(path.join(root, "notes.txt"), "first\nsecond\nthird", "utf8");
+  const controller = new AbortController();
+  const originalCheck = controller.signal.throwIfAborted.bind(controller.signal);
+  let checks = 0;
+  controller.signal.throwIfAborted = () => {
+    checks += 1;
+    if (checks === 9) controller.abort(); // Second line, after traversal and the first line check.
+    originalCheck();
+  };
+
+  const outcome = await tools.execute({
+    ...toolRequest("grep", { path: ".", query: "missing" }),
+    signal: controller.signal,
+  });
+  assert.ok(checks >= 9);
+  assert.equal(outcome.kind, "failed");
+  assert.equal(outcome.error.code, "TURN_CANCELLED");
+});
+
 test("shell streams output, reports non-zero exits and timeouts distinctly", async () => {
   const { tools } = await workspace();
   const streamed = [];

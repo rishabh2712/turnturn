@@ -6,10 +6,13 @@ import type { WorkspacePathGuard } from "./path-guard.js";
 import { booleanField, objectInput, optionalInteger, stringField } from "./tool-input.js";
 import { completed, failed, toolError } from "./tool-results.js";
 
-export async function readTool(input: JsonValue, paths: WorkspacePathGuard): Promise<ToolOutcome> {
+export async function readTool(input: JsonValue, paths: WorkspacePathGuard, signal: AbortSignal): Promise<ToolOutcome> {
+  signal.throwIfAborted();
   const args = objectInput(input);
   const target = await paths.existingFile(stringField(args, "path"));
-  const bytes = await fs.readFile(target.absolute);
+  signal.throwIfAborted();
+  const bytes = await fs.readFile(target.absolute, { signal });
+  signal.throwIfAborted();
   const text = utf8Text(bytes);
   if (!text.ok) return failed("BINARY_FILE", "File is binary or not valid UTF-8");
 
@@ -18,6 +21,7 @@ export async function readTool(input: JsonValue, paths: WorkspacePathGuard): Pro
   const limit = optionalInteger(args.limit, lines.length);
   const start = Math.max(1, offset);
   const selected = lines.slice(start - 1, start - 1 + Math.max(0, limit));
+  signal.throwIfAborted();
   return completed({
     path: target.relative,
     content: selected.map((line, index) => `${start + index}: ${line}`).join("\n"),

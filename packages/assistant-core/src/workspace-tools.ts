@@ -53,15 +53,15 @@ class WorkspaceToolExecutor implements ToolExecutorPort {
     try {
       switch (request.name) {
         case "read":
-          return await readTool(request.input, this.paths);
+          return await readTool(request.input, this.paths, request.signal);
         case "write":
           return await writeTool(request.input, this.paths);
         case "edit":
           return await editTool(request.input, this.paths);
         case "glob":
-          return await globTool(request.input, this.paths);
+          return await globTool(request.input, this.paths, request.signal);
         case "grep":
-          return await grepTool(request.input, this.paths);
+          return await grepTool(request.input, this.paths, request.signal);
         case "shell":
           return await shellTool(request, this.paths, {
             maxOutputBytes: this.maxOutputBytes,
@@ -72,6 +72,9 @@ class WorkspaceToolExecutor implements ToolExecutorPort {
           return failed("UNKNOWN_TOOL", `Unknown tool: ${request.name}`);
       }
     } catch (error) {
+      if (request.signal.aborted && (request.name === "read" || request.name === "glob" || request.name === "grep")) {
+        return failed("TURN_CANCELLED", "Turn cancelled during tool execution");
+      }
       if (error instanceof ToolInputError) return failed(error.code, error.message);
       return failed("TOOL_UNHANDLED", error instanceof Error ? error.message : String(error), true);
     }

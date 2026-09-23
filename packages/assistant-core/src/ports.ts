@@ -107,8 +107,9 @@ export interface ToolExecutorPort {
 
   /**
    * Tool-level failures, such as a missing file or a non-runnable command, are returned as
-   * `{ kind: "failed" }`. Throwing means the executor implementation itself is broken and the
-   * engine should fail the turn.
+   * `{ kind: "failed" }`. If an executor throws, the wave executor converts that exception
+   * into a failed result for this call without cancelling its siblings. Validation and
+   * policy-service exceptions occur before execution and fail the turn instead.
    */
   execute(request: ToolExecutionRequest): Promise<ToolOutcome>;
 }

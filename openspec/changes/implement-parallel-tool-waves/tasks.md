@@ -27,27 +27,31 @@ Run `node scripts/check-milestone-gate.mjs implement-parallel-tool-waves` before
 ### 0. Baseline and planner
 
 - [ ] Record the current test counts. Demonstrate that two independent reads do **not** overlap today with a temporary red barrier test; retain it for Step 2, but do not leave an unexpected failing test in the verified Step 0 suite. Keep the existing provider-order test as the sequential baseline.
-- [ ] Add a small internal wave planner/classifier, using `ToolExecutorPort.definitions()` plus the built-in read-only allowlist. Test `[read, grep, edit, glob]`, unknown tools, missing definitions, and the four-call cap. No execution change in this step.
+- [x] Add a small internal wave planner/classifier, using `ToolExecutorPort.definitions()` plus the built-in read-only allowlist. Tests cover built-in read/search, mutating and unknown tools, missing definitions, and the four-call cap.
+
+The first Step 0 checkbox is historical and remains open: no pre-implementation red run was preserved. The retained no-definition sequential fixture and the new deterministic overlap/barrier tests prove current behavior, but they do not recreate that earlier evidence.
 
 ### 1. Bound each admitted read-only call
 
-- [ ] After the contract-altering gate, add an optional `AssistantServerConfig.readOnlyToolTimeouts` policy with a finite positive default, maximum, and optional per-name overrides for `read`, `glob`, and `grep`. Define and validate its numeric bounds at startup; the model does not set these deadlines. Wire the same policy into the memory and persistent server paths without changing `ToolExecutorPort` or protocol shapes.
-- [ ] Compose a deadline-enforcing `ToolExecutorPort` around the server's workspace executor. Link each admitted read-only call's controller to the parent turn signal, return one `TOOL_TIMEOUT` failed outcome on deadline, and suppress callbacks and late settlement after the logical outcome. Prove independently timed siblings, an ignored signal, a late resolution/callback, and turn cancellation with deterministic deferred-promise tests.
-- [ ] Pass/check the signal through built-in `read`, `glob`, and `grep` operations, including directory traversal and long scans. Verify cancellation stops further traversal where possible; document that the deadline wrapper bounds the logical wait even where a filesystem operation cannot be physically interrupted. Shell retains its existing sequential timeout, and no synthetic timeout is added to `write`/`edit`.
+- [x] After the contract-altering gate, add optional `AssistantServerConfig.readOnlyToolTimeouts` with bounded default, maximum, and per-name overrides. Startup validation occurs when the runtime constructs the wrapper; the persistent session registry reuses `runtime.tools`. No protocol or `ToolExecutorPort` shape changed.
+- [x] Wrap the workspace executor with independent read/search deadlines and linked turn cancellation. Tests cover a timed-out sibling alongside success, ignored abort, immediate turn cancellation, suppression of output and settlement after a logical terminal outcome, and first-outcome precedence when timeout-triggered abort reentrantly cancels the turn.
+- [x] Pass/check the signal through built-in `read`, `glob`, and `grep`, including per-entry and per-line checks during traversal/scanning and `fs.readFile` abort where supported. Pre-cancelled and mid-traversal cases are tested. Directory calls without native cancellation can finish one in-flight filesystem operation before the next check; the wrapper still bounds the logical wait. Shell keeps its own timeout; no synthetic timeout was added to `write`/`edit`.
 
 ### 2. Execute read-only waves
 
 - [x] Coordinator slice: separate inspection from durable effects; drain earlier requested reads before approval, denial, abort, invalid input, or mutating barriers. Abort queued requests on policy/validation exception before `turn.failed`; do not admit later calls after cancellation. Four deterministic tests cover these boundaries. Inspection and wave execution now have separate internal modules; the core suite passes 111/111. This does not close the broader Step 2 or Step 3 scenarios below.
-- [ ] Refactor `ToolWaveRunner` so preparation and execution are separable without duplicating validation/policy. Make the Step 0 overlap test green and prove `[read, read, edit, read]` never lets the final read overtake the edit.
-- [ ] Dispatch admitted reads concurrently, collect one logical outcome keyed by `toolCallId` for each, and append terminal results in provider order. Test reversed completion order, mixed success/recoverable failure, timeout, executor throw, `allow-modified` revalidation, denial, policy abort, and an `ask` decision between reads. A tool failure must not cancel a sibling; a policy abort intentionally cancels the turn.
-- [ ] Reconcile the stale `ToolExecutorPort.execute` comment with the runner's tested nonfatal executor-throw behavior, without changing the port signature. Test a validation/policy-service exception after earlier siblings were requested: terminate those requests before failing the turn; do not recast the exception as one tool's recoverable failure.
+- [x] Refactor `ToolWaveRunner` so preparation and execution are separate. Deterministic barriers prove two reads overlap while `[read, read, edit, read]` cannot cross the edit.
+- [x] Dispatch admitted reads concurrently, retain each outcome with its call id, and append terminal results in provider order. Tests cover reversed completion, recoverable failure, timeout, executor throw, `allow-modified` revalidation, denial, policy abort, and approval between reads; a failed sibling does not cancel its peer.
+- [x] Reconcile the `ToolExecutorPort.execute` comment with tested nonfatal executor-throw behavior. Policy-service and validation exceptions after an earlier request abort that request before `turn.failed`; neither is recast as a recoverable tool result.
 - [x] Fix the approval visibility race found during coordinator testing: `approval.requested` is durable, the waiter registers, then the live event publishes. A live sink that resolves immediately now succeeds on its first attempt; both reducers report no issues.
+
+Pre-Step-3 verification on 2026-09-23: design gate passed; assistant-core lint/build/typecheck and **128/128** tests passed; assistant-server lint/build/typecheck and **74/74** tests passed; root lint/build/typecheck/test passed. No live-model multi-read turn was run or claimed.
 
 ### 3. Cancellation and replay
 
 - [ ] Add a failing mid-wave cancellation test: cancel while two reads are active, settle each requested call within its deadline, append both terminal results before `turn.aborted`, and reject late outcomes/callbacks. Assert no later wave started or acquired a synthetic request/result pair. Reconcile the existing `recordSkippedToolAbort` path with D1, including cancellation during validation/policy preparation.
 - [ ] Add a session-log restart test ending mid-wave: repair outstanding requests once, replay cleanly through both reducers, and prove a second open appends nothing.
-- [ ] Add a two-step provider-history round trip with at least two parallel read requests/results, then verify the next provider step sees each result paired to its original call id and in provider order.
+- [x] Add a two-step provider-history round trip with parallel reads; the next provider step sees both results paired by original call id and in provider order, with both reducers clean.
 - [ ] Inject a durable-append failure separately. Do not report an ordinary tool failure or claim a completed/aborted durable turn when the writer cannot persist the required terminal record; record the resulting limitation without altering protocol semantics in this change.
 
 ### 4. Close out
