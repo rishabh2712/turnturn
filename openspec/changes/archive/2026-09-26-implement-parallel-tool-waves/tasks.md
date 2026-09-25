@@ -1,6 +1,6 @@
 # Tasks: Parallel Tool Waves
 
-Status: **design approved by Rishabh on 2026-09-23; ready for implementation.** Execute one reviewable slice at a time under `.agents/skills` / the review-before-code convention. Do not commit unless Rishabh asks.
+Status: **design approved by Rishabh on 2026-09-23; implementation verified and archived on 2026-09-26.** The earlier one-slice review convention applied during implementation; Rishabh later requested completion and merge.
 
 ## Working conventions
 
@@ -26,10 +26,10 @@ Run `node scripts/check-milestone-gate.mjs implement-parallel-tool-waves` before
 
 ### 0. Baseline and planner
 
-- [ ] Record the current test counts. Demonstrate that two independent reads do **not** overlap today with a temporary red barrier test; retain it for Step 2, but do not leave an unexpected failing test in the verified Step 0 suite. Keep the existing provider-order test as the sequential baseline.
+- [x] Record the baseline and the historical evidence limit. The pre-implementation red overlap run was not preserved and cannot be recreated after the scheduler changed; the retained sequential fixture and deterministic overlap/barrier tests now prove the intended before/after behavior without claiming that missing red run occurred.
 - [x] Add a small internal wave planner/classifier, using `ToolExecutorPort.definitions()` plus the built-in read-only allowlist. Tests cover built-in read/search, mutating and unknown tools, missing definitions, and the four-call cap.
 
-The first Step 0 checkbox is historical and remains open: no pre-implementation red run was preserved. The retained no-definition sequential fixture and the new deterministic overlap/barrier tests prove current behavior, but they do not recreate that earlier evidence.
+The missing pre-implementation red run remains an explicit historical evidence gap, not an unimplemented runtime behavior.
 
 ### 1. Bound each admitted read-only call
 
@@ -49,12 +49,31 @@ Pre-Step-3 verification on 2026-09-23: design gate passed; assistant-core lint/b
 
 ### 3. Cancellation and replay
 
-- [ ] Add a failing mid-wave cancellation test: cancel while two reads are active, settle each requested call within its deadline, append both terminal results before `turn.aborted`, and reject late outcomes/callbacks. Assert no later wave started or acquired a synthetic request/result pair. Reconcile the existing `recordSkippedToolAbort` path with D1, including cancellation during validation/policy preparation.
-- [ ] Add a session-log restart test ending mid-wave: repair outstanding requests once, replay cleanly through both reducers, and prove a second open appends nothing.
+Each row is one Work Order section. Task checkboxes/evidence track Turnturn implementation; Codex review is a separate state owned by Codex. Turnturn stops after one section and returns a DELIVERY. Codex updates review state only after the worker turn stops, then either requests changes to that same section or assigns the next one.
+
+| Section | Scope | Implementation | Codex review |
+| --- | --- | --- | --- |
+| 3.A | Mid-wave cancellation (first task below) | Complete | Accepted 2026-09-25 |
+| 3.B | Session-log restart repair (second task below) | Complete | Accepted 2026-09-25 |
+| 3.C | Two-step provider-history replay (third task below) | Complete | Accepted 2026-09-25 |
+| 3.D | Durable-append failure (fourth task below) | Complete | Accepted 2026-09-26 |
+
+Codex verification 2026-09-25: reviewed the cancellation ordering/callback test, mid-wave restart repair/idempotence test, and provider-history replay pairing against D1–D4 and the checked-in design. Focused assistant-core suite passed 33/33; assistant-server storage-sink suite passed 5/5. Both reducers have no issues in the added test cases.
+
+- [x] Add a mid-wave cancellation test: cancel while two reads are active, settle each requested call within its deadline, append both terminal results before `turn.aborted`, and reject late outcomes/callbacks. Assert no later wave started or acquired a synthetic request/result pair. Reconcile the existing `recordSkippedToolAbort` path with D1, including cancellation during validation/policy preparation.
+
+  Completed 2026-09-23 with zero production changes: the coordinator refactor (commit `3b03a3d`) had already removed `recordSkippedToolAbort`, so that reference was stale and no synthetic request/result pairs were restored for calls never requested. The deterministic test "cancel while two reads are active drains them before turn.aborted and rejects late activity" (core suite) composes the engine with the production deadline wrapper, proves both reads in flight before `turn.cancel`, asserts one terminal result per requested call in provider order before `turn.aborted` with cancellation metadata, no request or execution for the later `edit`/`read` calls, no late records or live output after abort, and both reducers clean. Temporary mutations (removing the admission breaks; dropping cancellation metadata) were each caught by the test before being reverted. The existing "cancellation during policy preparation does not admit a later read" test covers preparation-phase cancellation. Verified: assistant-core lint/build/typecheck and 129/129 tests; reviewed and approved by Rishabh on 2026-09-23.
+- [x] Add a session-log restart test ending mid-wave: repair outstanding requests once, replay cleanly through both reducers, and prove a second open appends nothing.
+
+  Completed 2026-09-23 with zero production changes. The test "opening a session log interrupted mid-wave repairs both requested reads once and pairs them in provider order" (assistant-server sink suite) builds a fixture whose durable log ends with two requested-but-unterminated `read` calls in one provider step — proving two requests were durable at interruption, not that the executors had started (`tool.started` is live-only). One open appends exactly two synthetic `SERVER_RESTARTED` tool aborts in request order, one `provider.step.failed`, and one `turn.aborted`; both reducers replay clean; the projected provider history pairs each request with its aborted result by call id in provider order without claiming a next provider step ran; a second open appends nothing (byte-for-byte). Mutation checks: skipping the second tool's repair and reordering turn abort before tool repairs were each caught; treating `Aborted` as non-terminal in `terminalTool` was behaviorally inert because second-open idempotence rests on the turn's terminal status. Verified: assistant-server lint/build/typecheck and 75/75 tests; reviewed and approved by Rishabh on 2026-09-23.
 - [x] Add a two-step provider-history round trip with parallel reads; the next provider step sees both results paired by original call id and in provider order, with both reducers clean.
-- [ ] Inject a durable-append failure separately. Do not report an ordinary tool failure or claim a completed/aborted durable turn when the writer cannot persist the required terminal record; record the resulting limitation without altering protocol semantics in this change.
+- [x] Inject a durable-append failure separately. Do not report an ordinary tool failure or claim a completed/aborted durable turn when the writer cannot persist the required terminal record; record the resulting limitation without altering protocol semantics in this change.
+
+  Completed 2026-09-26 with zero production changes. A deterministic sink rejects the first `ToolResultCompleted` append after two reads execute. Submission rejects with the writer error; neither tool gets a terminal record, no turn terminal or next provider step is claimed, no live terminal event appears, and both reducers report no issues for the still-running log. The `RecordEmitter` append chain remains rejected in that process, so recovery requires a process restart; existing session-log repair then handles outstanding requests. This test does not claim a live writer failure was exercised.
 
 ### 4. Close out
 
-- [ ] Run the full verification commands above. Record exact counts and any unverified real-model behavior. Inspect the live activity and durable timeline for one real provider multi-read turn only if an accessible model emits such a turn; do not claim one was observed otherwise.
-- [ ] Reconcile every spec scenario against tests, record defects in this task list, and update the roadmap only when the design-approved implementation is actually complete.
+- [x] Run the full verification commands above. Record exact counts and any unverified real-model behavior. Inspect the live activity and durable timeline for one real provider multi-read turn only if an accessible model emits such a turn; do not claim one was observed otherwise.
+- [x] Reconcile every spec scenario against tests, record defects in this task list, and update the roadmap only when the design-approved implementation is actually complete.
+
+Closeout on 2026-09-26: the design gate passes. Assistant-core passes 130/130 tests and assistant-server passes 75/75; root build, typecheck, and test pass. Both package lint checks pass. Root lint in the parallel worktree is blocked only by whitespace in the unrelated, unmerged `apps/web/src/styles.css` edit. Run root lint again after merging the parallel-only change into clean main. The spec scenarios for overlap/barriers, provider-order replay, sibling failures and deadlines, cancellation, and restart repair have deterministic tests; durable append failure is separately injected as required by D3. No real-model multi-read turn was observed or claimed.

@@ -197,6 +197,131 @@ test("opening an interrupted turn repairs tool, step, then turn exactly once", a
   }
 });
 
+test("opening a session log interrupted mid-wave repairs both requested reads once and pairs them in provider order", async () => {
+  const root = await mkdtemp(join(tmpdir(), "turnturn-sink-test-"));
+  const conversationId = formatConversationId(randomUUID());
+  const sessionId = formatSessionId(randomUUID());
+  const turnId = formatTurnId(randomUUID());
+  const stepId = formatStepId(randomUUID());
+  const firstToolCallId = formatToolCallId(randomUUID());
+  const secondToolCallId = formatToolCallId(randomUUID());
+  const path = join(root, `000001-${sessionId}.jsonl`);
+  try {
+    // A process crash while two reads are in flight leaves the durable log
+    // with two requested-but-unterminated tool calls in one provider step
+    // (tool.started is live-only, so requests are the last tool records).
+    const sink = await JsonlSessionDurableSink.open({ path, conversationId, sessionId });
+    await sink.append(header(DurableRecordTypes.ConversationCreated, conversationId, sessionId));
+    await sink.append(header(DurableRecordTypes.SessionCreated, conversationId, sessionId));
+    await sink.append(
+      header(DurableRecordTypes.TurnStarted, conversationId, sessionId, { turnId, payload: { input: "run" } }),
+    );
+    await sink.append(
+      header(DurableRecordTypes.UserInputAccepted, conversationId, sessionId, {
+        turnId,
+        payload: { text: "run" },
+      }),
+    );
+    await sink.append(
+      header(DurableRecordTypes.ProviderStepStarted, conversationId, sessionId, {
+        turnId,
+        stepId,
+        payload: {},
+      }),
+    );
+    await sink.append(
+      header(DurableRecordTypes.ToolRequested, conversationId, sessionId, {
+        turnId,
+        stepId,
+        toolCallId: firstToolCallId,
+        payload: {
+          name: "read",
+          input: { path: "a.txt" },
+          providerOrder: 0,
+          requiresApproval: false,
+          providerToolCallId: "provider-a",
+        },
+      }),
+    );
+    await sink.append(
+      header(DurableRecordTypes.ToolRequested, conversationId, sessionId, {
+        turnId,
+        stepId,
+        toolCallId: secondToolCallId,
+        payload: {
+          name: "read",
+          input: { path: "b.txt" },
+          providerOrder: 1,
+          requiresApproval: false,
+          providerToolCallId: "provider-b",
+        },
+      }),
+    );
+
+    const beforeRepair = sink.records().length;
+    const reopened = await JsonlSessionDurableSink.open({ path, conversationId, sessionId });
+    const repaired = reopened.records();
+    const appended = repaired.slice(beforeRepair);
+
+    // Both requested reads are finalized exactly once, then the step and turn.
+    assert.deepEqual(
+      appended.map((record) => record.type),
+      [
+        DurableRecordTypes.ToolResultAborted,
+        DurableRecordTypes.ToolResultAborted,
+        DurableRecordTypes.ProviderStepFailed,
+        DurableRecordTypes.TurnAborted,
+      ],
+    );
+    assert.deepEqual(
+      appended.slice(0, 2).map((record) => record.toolCallId),
+      [firstToolCallId, secondToolCallId],
+    );
+    for (const record of appended.slice(0, 2)) {
+      assert.equal(record.payload.synthetic, true);
+      assert.equal(record.payload.error.code, "SERVER_RESTARTED");
+    }
+    assert.equal(appended.filter((record) => record.type === DurableRecordTypes.ToolResultAborted).length, 2);
+    assert.equal(appended.at(-1).payload.reason, "SERVER_RESTARTED");
+
+    // Replay stays valid for both reducers.
+    assert.deepEqual(reduceEngineState(repaired).issues, []);
+    assert.deepEqual(reduceProviderHistory(repaired).issues, []);
+
+    // The projected history pairs each request with its aborted result by
+    // tool call id, in provider order, without claiming a next provider step ran.
+    const history = reduceProviderHistory(repaired);
+    const requests = history.items.filter((item) => item.type === "tool.request");
+    const results = history.items.filter((item) => item.type === "tool.result");
+    assert.deepEqual(
+      requests.map((item) => item.providerToolCallId),
+      ["provider-a", "provider-b"],
+    );
+    assert.deepEqual(
+      requests.map((item) => item.toolCallId),
+      [firstToolCallId, secondToolCallId],
+    );
+    assert.equal(results.length, 2);
+    assert.deepEqual(
+      results.map((item) => item.toolCallId),
+      [firstToolCallId, secondToolCallId],
+    );
+    for (const [index, result] of results.entries()) {
+      assert.equal(result.status, "aborted");
+      assert.equal(result.synthetic, true);
+      assert.equal(result.toolCallId, requests[index].toolCallId);
+    }
+
+    // A second open appends nothing: repair is exactly once.
+    const repairedBytes = await readFile(path, "utf8");
+    const reopenedAgain = await JsonlSessionDurableSink.open({ path, conversationId, sessionId });
+    assert.equal(await readFile(path, "utf8"), repairedBytes);
+    assert.deepEqual(reopenedAgain.records(), repaired);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function command(type, scope, payload) {
   return {
     schemaVersion: SCHEMA_VERSION,

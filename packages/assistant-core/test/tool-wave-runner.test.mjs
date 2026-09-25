@@ -8,6 +8,7 @@ import {
   formatConversationId,
   formatSessionId,
   formatTurnId,
+  LiveEventTypes,
 } from "@turnturn/protocol";
 import { reduceEngineState } from "@turnturn/protocol/engine-state";
 import { reduceProviderHistory } from "@turnturn/protocol/provider-history";
@@ -80,6 +81,13 @@ function deferred() {
 function toolCall(callId, path) {
   return { type: "tool-call-complete", call: { callId, name: "read", input: { path } } };
 }
+
+const terminalTypes = [
+  DurableRecordTypes.ToolResultCompleted,
+  DurableRecordTypes.ToolResultFailed,
+  DurableRecordTypes.ToolResultDenied,
+  DurableRecordTypes.ToolResultAborted,
+];
 
 function terminalFor(records, callId) {
   const request = records.find(
@@ -1386,4 +1394,194 @@ test("the next provider step receives both parallel read results paired by call 
   assert.deepEqual(history.issues, []);
   assert.deepEqual(reduceEngineState(durable.records()).issues, []);
   assert.deepEqual(reduceProviderHistory(durable.records()).issues, []);
+});
+
+test(
+  "cancel while two reads are active drains them before turn.aborted and rejects late activity",
+  { timeout: 2000 },
+  async () => {
+    const { createDeadlineWrapper } = await import("../dist/deadline-wrapper.js");
+    const aStarted = deferred();
+    const bStarted = deferred();
+    const releaseA = deferred();
+    const releaseB = deferred();
+    const entered = [];
+
+    // Misbehaving executors: they ignore their abort signal, so only the deadline
+    // wrapper's linked turn cancellation bounds the logical wait. After the turn
+    // aborts they settle late and attempt to emit output, which must be rejected.
+    const rawTools = new MemoryToolExecutor(
+      (request) => {
+        entered.push(request.input.path);
+        if (request.input.path === "a") {
+          aStarted.resolve();
+          return releaseA.promise;
+        }
+        bStarted.resolve();
+        return releaseB.promise;
+      },
+      [
+        { name: "read", description: "Read a file", parameters: {}, mutating: false },
+        { name: "edit", description: "Edit a file", parameters: {}, mutating: true },
+      ],
+    );
+    const tools = createDeadlineWrapper(rawTools, { defaultMs: 5000, maxMs: 10000 });
+
+    const { engine, durable, live } = await seededEngine({
+      tools,
+      provider: new ScriptedProvider([
+        [
+          toolCall("a", "a"),
+          toolCall("b", "b"),
+          {
+            type: "tool-call-complete",
+            call: { callId: "c", name: "edit", input: { path: "c" } },
+          },
+          toolCall("d", "d"),
+          { type: "completed", reason: "tool-use" },
+        ],
+        [{ type: "completed", reason: "complete" }],
+      ]),
+    });
+
+    const turn = engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 103));
+
+    // Both reads are dispatched concurrently and are genuinely in flight.
+    await Promise.all([aStarted.promise, bStarted.promise]);
+    assert.deepEqual(entered, ["a", "b"]);
+
+    const cancelling = engine.submit(
+      command(CommandTypes.TurnCancel, { reason: "stop now" }, { turnId: ids.turnId }, 104),
+    );
+    await Promise.all([turn, cancelling]);
+
+    const records = durable.records();
+    const aResult = terminalFor(records, "a");
+    const bResult = terminalFor(records, "b");
+    const turnAborted = records.find((record) => record.type === DurableRecordTypes.TurnAborted);
+
+    // One terminal result per requested call, in provider order, before turn.aborted.
+    assert.ok(aResult, "read a must receive a terminal result");
+    assert.ok(bResult, "read b must receive a terminal result");
+    const toolCallIdFor = (providerCallId) =>
+      records.find(
+        (record) =>
+          record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === providerCallId,
+      )?.toolCallId;
+    const terminalsFor = (providerCallId) => {
+      const toolCallId = toolCallIdFor(providerCallId);
+      return toolCallId === undefined
+        ? []
+        : records.filter((record) => record.toolCallId === toolCallId && terminalTypes.includes(record.type));
+    };
+    assert.equal(terminalsFor("a").length, 1, "read a must have exactly one terminal result");
+    assert.equal(terminalsFor("b").length, 1, "read b must have exactly one terminal result");
+    assert.ok(aResult.sequence < bResult.sequence, "terminal results are appended in provider order");
+    assert.ok(turnAborted, "turn must be aborted");
+    assert.ok(bResult.sequence < turnAborted.sequence, "every terminal result precedes turn.aborted");
+    assert.equal(records.at(-1).type, DurableRecordTypes.TurnAborted);
+
+    // Cancellation metadata is preserved for calls that settle after turn.cancel.
+    assert.equal(aResult.payload.cancellation?.requested, true);
+    assert.equal(aResult.payload.cancellation?.reason, "stop now");
+    assert.equal(bResult.payload.cancellation?.requested, true);
+
+    // No later wave started: the edit barrier and the read behind it were never
+    // requested, and no synthetic request/result pair was created for them.
+    for (const providerCallId of ["c", "d"]) {
+      assert.equal(
+        records.some(
+          (record) =>
+            record.type === DurableRecordTypes.ToolRequested && record.payload.providerToolCallId === providerCallId,
+        ),
+        false,
+        `call ${providerCallId} must not be requested after cancellation`,
+      );
+      assert.equal(terminalsFor(providerCallId).length, 0);
+    }
+    assert.equal(entered.includes("c"), false);
+    assert.equal(entered.includes("d"), false);
+
+    // Late outcomes and late callbacks are rejected: nothing is appended and no
+    // live output escapes after the turn aborted.
+    const recordCount = records.length;
+    releaseA.resolve(completed("late A"));
+    releaseB.resolve(completed("late B"));
+    for (const request of rawTools.requests) {
+      request.callbacks.stdout("late output");
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(records.length, recordCount, "late settlement must not append any record");
+    assert.equal(
+      live.events.some((event) => event.type === LiveEventTypes.StdoutDelta),
+      false,
+      "late executor output must not be published",
+    );
+
+    assert.deepEqual(reduceEngineState(records).issues, []);
+    assert.deepEqual(reduceProviderHistory(records).issues, []);
+  },
+);
+
+test("a durable tool-result append failure does not claim a terminal wave or turn", async () => {
+  const writeFailure = new Error("session writer unavailable");
+  class FailingResultSink extends MemoryDurableSink {
+    attemptedResults = 0;
+
+    async append(draft) {
+      if (draft.type === DurableRecordTypes.ToolResultCompleted) {
+        this.attemptedResults += 1;
+        throw writeFailure;
+      }
+      return super.append(draft);
+    }
+  }
+
+  const durable = new FailingResultSink();
+  const tools = new MemoryToolExecutor((request) => completed(request.input.path), readDefinitions);
+  const provider = new ScriptedProvider([
+    [toolCall("a", "a"), toolCall("b", "b"), { type: "completed", reason: "tool-use" }],
+    [{ type: "completed", reason: "complete" }],
+  ]);
+  const { engine, live } = await seededEngine({ durable, tools, provider });
+
+  await assert.rejects(
+    engine.submit(command(CommandTypes.TurnSubmit, { input: "read both" }, { turnId: ids.turnId }, 105)),
+    (error) => error === writeFailure,
+  );
+
+  const records = durable.records();
+  assert.equal(durable.attemptedResults, 1, "the writer rejects the first terminal tool result");
+  assert.deepEqual(
+    records
+      .filter((record) => record.type === DurableRecordTypes.ToolRequested)
+      .map((record) => record.payload.providerToolCallId),
+    ["a", "b"],
+  );
+  assert.deepEqual(
+    tools.requests.map((request) => request.input.path),
+    ["a", "b"],
+    "both reads finished before terminal records were appended",
+  );
+  assert.equal(records.filter((record) => terminalTypes.includes(record.type)).length, 0);
+  assert.equal(
+    records.some((record) =>
+      [DurableRecordTypes.TurnCompleted, DurableRecordTypes.TurnAborted, DurableRecordTypes.TurnFailed].includes(
+        record.type,
+      ),
+    ),
+    false,
+    "an incomplete durable wave must not be reported as a terminal turn",
+  );
+  assert.equal(provider.requests.length, 1, "no next provider step receives an incomplete wave");
+  assert.equal(
+    live.events.some((event) =>
+      [LiveEventTypes.TurnCompleted, LiveEventTypes.TurnAborted, LiveEventTypes.TurnFailed].includes(event.type),
+    ),
+    false,
+    "live activity must not claim a terminal result that could not be persisted",
+  );
+  assert.deepEqual(reduceEngineState(records).issues, []);
+  assert.deepEqual(reduceProviderHistory(records).issues, []);
 });
